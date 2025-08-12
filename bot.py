@@ -51,21 +51,21 @@ def tr_upper(s: str) -> str:
 
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
-    update.message.reply_text("Selam reis! /pdf yaz, sırayla TC → Ad → Soyad alayım, PDF’ni göndereyim.")
+    update.message.reply_text("Başlamak için /pdf yaz lütfen.")
     return ConversationHandler.END
 
 def start_pdf(update: Update, context: CallbackContext):
-    update.message.reply_text("📄 TC numarasını yaz:")
+    update.message.reply_text("Müşterinin TC numarasını yaz:")
     return TC
 
 def get_tc(update: Update, context: CallbackContext):
     context.user_data["tc"] = update.message.text.strip()
-    update.message.reply_text("Adını yaz:")
+    update.message.reply_text("Müşterinin Adını yaz:")
     return NAME
 
 def get_name(update: Update, context: CallbackContext):
     context.user_data["name"] = update.message.text  # tr_upper'ı en sonda uygulayacağız
-    update.message.reply_text("Soyadını yaz:")
+    update.message.reply_text("Müşterinin Soyadını yaz:")
     return SURNAME
 
 def get_surname(update: Update, context: CallbackContext):
@@ -83,7 +83,7 @@ def get_surname(update: Update, context: CallbackContext):
     )
 
     if not pdf_path:
-        update.message.reply_text("❌ PDF oluşturulamadı veya sunucu yanıt vermedi.")
+        update.message.reply_text("❌ PDF oluşturulamadı.")
         return ConversationHandler.END
 
     # Boyut logu
