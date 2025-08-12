@@ -29,6 +29,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("telegrampdf")
 
+# ================== YARDIMCI ==================
+def tr_upper(s: str) -> str:
+    """Türkçe büyük harfe çevir (i→İ, ı→I fix) + kenar boşluklarını temizle."""
+    if not isinstance(s, str):
+        return s
+    s = s.strip()
+    s = s.replace("i", "İ").replace("ı", "I")
+    return s.upper()
 
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
@@ -45,19 +53,23 @@ def get_tc(update: Update, context: CallbackContext):
     return NAME
 
 def get_name(update: Update, context: CallbackContext):
-    context.user_data["name"] = update.message.text.strip()
+    context.user_data["name"] = update.message.text  # tr_upper'ı en sonda uygulayacağız
     update.message.reply_text("Soyadını yaz:")
     return SURNAME
 
 def get_surname(update: Update, context: CallbackContext):
-    context.user_data["surname"] = update.message.text.strip()
+    context.user_data["surname"] = update.message.text  # tr_upper'ı hemen aşağıda uygularız
     update.message.reply_text("⏳ PDF hazırlanıyor")
 
+    # Türkçe doğru büyük harf dönüştürme
+    name_up = tr_upper(context.user_data["name"])
+    surname_up = tr_upper(context.user_data["surname"])
+
     pdf_path = generate_pdf(
-    context.user_data["tc"],
-    context.user_data["name"].upper(),
-    context.user_data["surname"].upper()
-)
+        context.user_data["tc"],
+        name_up,
+        surname_up
+    )
 
     if not pdf_path:
         update.message.reply_text("❌ PDF oluşturulamadı veya sunucu yanıt vermedi.")
@@ -102,7 +114,6 @@ def cmd_cancel(update: Update, context: CallbackContext):
     update.message.reply_text("İptal edildi.")
     return ConversationHandler.END
 
-
 # ================== PDF OLUŞTURMA ==================
 def generate_pdf(tc: str, name: str, surname: str) -> str:
     """
@@ -127,11 +138,9 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
         log.exception(f"generate_pdf hata: {e}")
         return ""
 
-
 # ================== ERROR HANDLER ==================
 def on_error(update: object, context: CallbackContext):
     log.exception("Unhandled error", exc_info=context.error)
-
 
 # ================== MAIN ==================
 def main():
@@ -174,7 +183,6 @@ def main():
     log.info("Bot açılıyor...")
     updater.start_polling(drop_pending_updates=True)  # pending update'leri at
     updater.idle()
-
 
 if __name__ == "__main__":
     main()
