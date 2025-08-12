@@ -96,12 +96,12 @@ def get_surname(update: Update, context: CallbackContext):
     # 3 deneme, uzun timeout ile gönder
     for attempt in range(1, 4):
         try:
+            filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
             with open(pdf_path, "rb") as f:
-                filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
-update.message.reply_document(
-    document=InputFile(f, filename=filename),
-    timeout=180
-)
+                update.message.reply_document(
+                    document=InputFile(f, filename=filename),
+                    timeout=180  # upload için geniş süre
+                )
             break
         except (NetworkError, TimedOut) as e:
             log.warning(f"send_document timeout/network (attempt {attempt}): {e}")
