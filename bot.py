@@ -1,3 +1,14 @@
+# --- PY313 fix: provide imghdr stub before telegram imports ---
+import sys, types
+try:
+    import imghdr  # Python 3.12'de var; 3.13'te yok.
+except ModuleNotFoundError:
+    m = types.ModuleType("imghdr")
+    def what(file, h=None):  # PTB'nin ihtiyacı sadece import başarısı; fonk no-op
+        return None
+    m.what = what
+    sys.modules["imghdr"] = m
+# --- END PY313 fix ---
 import os
 import time
 import tempfile
