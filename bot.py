@@ -55,13 +55,14 @@ def tr_upper(s: str) -> str:
 def check_group(update: Update) -> bool:
     """Mesajın doğru gruptan gelip gelmediğini kontrol et."""
     if update.effective_chat.id != ALLOWED_CHAT_ID:
+        update.message.reply_text("🚫 Hakkınız kapalıdır. Lütfen iletişime geçin @Cengizzatay")
         return False
     return True
 
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
     if not check_group(update):
-        return
+        return ConversationHandler.END
     update.message.reply_text("Başlamak için /pdf yaz lütfen.")
     return ConversationHandler.END
 
