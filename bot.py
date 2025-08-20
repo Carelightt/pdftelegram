@@ -55,7 +55,7 @@ def tr_upper(s: str) -> str:
 
 def check_group(update: Update) -> bool:
     """Mesajın doğru gruptan gelip gelmediğini kontrol et."""
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
+    if update.effective_chat.id not in ALLOWED_CHAT_IDS:
         update.message.reply_text("🚫 Hakkınız kapalıdır. Lütfen iletişime geçin @Cengizzatay")
         return False
     return True
