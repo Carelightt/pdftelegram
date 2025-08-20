@@ -56,7 +56,7 @@ def _check_group(update: Update) -> bool:
     """İzinli grup kontrolü. Değilse uyarı ver."""
     if update.effective_chat and update.effective_chat.id != ALLOWED_CHAT_ID:
         try:
-            update.message.reply_text("Hakkın kapalıdır destek için @CengizzAtay")
+            update.message.reply_text("🚫 Hakkınız kapalıdır. Lütfen iletişime geçin @CengizzAtay")
         except Exception:
             pass
         return False
