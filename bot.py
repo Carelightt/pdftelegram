@@ -30,8 +30,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ✅ SADECE BU GRUPTA ÇALIŞSIN
-ALLOWED_CHAT_ID = -1002950346446  # kendi grup ID'ni buraya yaz
+# ✅ SADECE İZİN VERDİĞİN GRUP
+ALLOWED_CHAT_ID = -1002950346446
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
@@ -52,46 +52,50 @@ def tr_upper(s: str) -> str:
     s = s.replace("i", "İ").replace("ı", "I")
     return s.upper()
 
-def check_group(update: Update) -> bool:
-    """Mesajın doğru gruptan gelip gelmediğini kontrol et."""
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
-        update.message.reply_text("🚫 Hakkınız kapalıdır. Lütfen iletişime geçin @Cengizzatay")
+def _check_group(update: Update) -> bool:
+    """İzinli grup kontrolü. Değilse uyarı ver."""
+    if update.effective_chat and update.effective_chat.id != ALLOWED_CHAT_ID:
+        try:
+            update.message.reply_text("Hakkın kapalıdır destek için @CengizzAtay")
+        except Exception:
+            pass
         return False
     return True
 
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
-    if not check_group(update):
+    if not _check_group(update):
         return ConversationHandler.END
     update.message.reply_text("Başlamak için /pdf yaz lütfen.")
     return ConversationHandler.END
 
 def start_pdf(update: Update, context: CallbackContext):
-    if not check_group(update):
+    if not _check_group(update):
         return ConversationHandler.END
     update.message.reply_text("Müşterinin TC numarasını yaz:")
     return TC
 
 def get_tc(update: Update, context: CallbackContext):
-    if not check_group(update):
+    if not _check_group(update):
         return ConversationHandler.END
     context.user_data["tc"] = update.message.text.strip()
     update.message.reply_text("Müşterinin Adını yaz:")
     return NAME
 
 def get_name(update: Update, context: CallbackContext):
-    if not check_group(update):
+    if not _check_group(update):
         return ConversationHandler.END
-    context.user_data["name"] = update.message.text
+    context.user_data["name"] = update.message.text  # tr_upper'ı en sonda uygulayacağız
     update.message.reply_text("Müşterinin Soyadını yaz:")
     return SURNAME
 
 def get_surname(update: Update, context: CallbackContext):
-    if not check_group(update):
+    if not _check_group(update):
         return ConversationHandler.END
-    context.user_data["surname"] = update.message.text
+    context.user_data["surname"] = update.message.text  # tr_upper'ı hemen aşağıda uygularız
     update.message.reply_text("⏳ PDF hazırlanıyor")
 
+    # Türkçe doğru büyük harf dönüştürme
     name_up = tr_upper(context.user_data["name"])
     surname_up = tr_upper(context.user_data["surname"])
 
@@ -105,19 +109,21 @@ def get_surname(update: Update, context: CallbackContext):
         update.message.reply_text("❌ PDF oluşturulamadı.")
         return ConversationHandler.END
 
+    # Boyut logu
     try:
         size_mb = os.path.getsize(pdf_path) / 1024 / 1024
         log.info(f"PDF size: {size_mb:.2f} MB")
     except Exception:
         pass
 
+    # 3 deneme, uzun timeout ile gönder
     for attempt in range(1, 4):
         try:
             filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
             with open(pdf_path, "rb") as f:
                 update.message.reply_document(
                     document=InputFile(f, filename=filename),
-                    timeout=180
+                    timeout=180  # upload için geniş süre
                 )
             break
         except (NetworkError, TimedOut) as e:
@@ -125,12 +131,13 @@ def get_surname(update: Update, context: CallbackContext):
             if attempt == 3:
                 update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
             else:
-                time.sleep(2 * attempt)
+                time.sleep(2 * attempt)  # 2s, 4s bekle ve tekrar dene
         except Exception as e:
             log.exception(f"send_document failed: {e}")
             update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
             break
 
+    # tmp temizlik
     try:
         os.remove(pdf_path)
     except Exception:
@@ -139,13 +146,17 @@ def get_surname(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 def cmd_cancel(update: Update, context: CallbackContext):
-    if not check_group(update):
+    if not _check_group(update):
         return ConversationHandler.END
     update.message.reply_text("İptal edildi.")
     return ConversationHandler.END
 
 # ================== PDF OLUŞTURMA ==================
 def generate_pdf(tc: str, name: str, surname: str) -> str:
+    """
+    Siteye formla POST eder, Content-Type application/pdf ise geçici dosyaya çevirir ve yolu döner.
+    Hata olursa "" döner.
+    """
     try:
         data = {"tc": tc, "ad": name, "soyad": surname}
         r = requests.post(PDF_URL, data=data, headers=HEADERS, timeout=60)
@@ -157,6 +168,7 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
             tmp.close()
             return tmp.name
         else:
+            # Hata durumunu logla (ilk 300 char)
             log.error(f"PDF alınamadı | status={r.status_code} ct={ct} body={r.text[:300]}")
             return ""
     except Exception as e:
@@ -172,6 +184,7 @@ def main():
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN .env'de yok!")
 
+    # Geniş timeout'lar ve connection pool
     request_kwargs = {
         "con_pool_size": 8,
         "connect_timeout": 30,
@@ -180,6 +193,7 @@ def main():
 
     updater = Updater(BOT_TOKEN, use_context=True, request_kwargs=request_kwargs)
 
+    # Eski webhook’u temizle (çatışma olmasın)
     try:
         updater.bot.delete_webhook(drop_pending_updates=True)
     except Exception as e:
@@ -188,6 +202,7 @@ def main():
     dp = updater.dispatcher
     dp.add_error_handler(on_error)
 
+    # Konuşma akışı
     conv = ConversationHandler(
         entry_points=[CommandHandler("pdf", start_pdf)],
         states={
@@ -203,7 +218,7 @@ def main():
     dp.add_handler(conv)
 
     log.info("Bot açılıyor...")
-    updater.start_polling(drop_pending_updates=True)
+    updater.start_polling(drop_pending_updates=True)  # pending update'leri at
     updater.idle()
 
 if __name__ == "__main__":
