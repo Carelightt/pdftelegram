@@ -30,9 +30,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ✅ SADECE BU GRUPLARDA ÇALIŞSIN
-ALLOWED_CHAT_IDS = [-1001234567890, -4682733069]  # buraya istediğin kadar ekleyebilirsin
-
+# ✅ SADECE BU GRUPTA ÇALIŞSIN
+ALLOWED_CHAT_ID = -4682733069  # kendi grup ID'ni buraya yaz
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
@@ -55,7 +54,7 @@ def tr_upper(s: str) -> str:
 
 def check_group(update: Update) -> bool:
     """Mesajın doğru gruptan gelip gelmediğini kontrol et."""
-    if update.effective_chat.id not in ALLOWED_CHAT_IDS:
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
         update.message.reply_text("🚫 Hakkınız kapalıdır. Lütfen iletişime geçin @Cengizzatay")
         return False
     return True
