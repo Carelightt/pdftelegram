@@ -31,7 +31,7 @@ PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ✅ SADECE İZİN VERDİĞİN GRUP
-ALLOWED_CHAT_ID = [-1002950346446, -1002955588715]
+ALLOWED_CHAT_ID = {-1002950346446, -1002955588715}  # set yaptım (performans + 'in' kontrolü)
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
@@ -54,9 +54,9 @@ def tr_upper(s: str) -> str:
 
 def _check_group(update: Update) -> bool:
     """İzinli grup kontrolü. Değilse uyarı ver."""
-    if update.effective_chat and update.effective_chat.id != ALLOWED_CHAT_ID:
+    if update.effective_chat and (update.effective_chat.id not in ALLOWED_CHAT_ID):
         try:
-            update.message.reply_text("Hakkın kapalıdır destek için @CengizzAtay")
+            update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yazsın.")
         except Exception:
             pass
         return False
@@ -68,6 +68,12 @@ def cmd_start(update: Update, context: CallbackContext):
         return ConversationHandler.END
     update.message.reply_text("Başlamak için /pdf yaz lütfen.")
     return ConversationHandler.END
+
+def cmd_whereami(update: Update, context: CallbackContext):
+    """Bulunduğun chat ve kullanıcı ID'sini gösterir (teşhis için)."""
+    cid = update.effective_chat.id if update.effective_chat else None
+    uid = update.effective_user.id if update.effective_user else None
+    update.message.reply_text(f"Chat ID: {cid}\nUser ID: {uid}")
 
 def start_pdf(update: Update, context: CallbackContext):
     if not _check_group(update):
@@ -215,6 +221,7 @@ def main():
     )
 
     dp.add_handler(CommandHandler("start", cmd_start))
+    dp.add_handler(CommandHandler("whereami", cmd_whereami))  # <— eklendi
     dp.add_handler(conv)
 
     log.info("Bot açılıyor...")
