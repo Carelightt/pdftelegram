@@ -28,10 +28,13 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/pdf,application/octet-stream,*/*"
+}
 
 # ✅ SADECE İZİN VERDİĞİN GRUP
-ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}  # yeni ID eklendi
+ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
@@ -62,6 +65,45 @@ def _check_group(update: Update) -> bool:
         return False
     return True
 
+def parse_pdf_inline(text: str):
+    """
+    /pdf komutunu tek mesajda yakalar.
+    Aşağıdaki formatları destekler:
+    1) Çok satırlı:
+       /PDF
+       TC
+       AD
+       SOYAD
+    2) Tek satır:
+       /pdf TC AD SOYAD
+    Başarılıysa (tc, ad, soyad) döner, yoksa None.
+    """
+    if not text:
+        return None
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+
+    if not lines:
+        return None
+
+    first = lines[0]
+    if not first.lower().startswith('/pdf'):
+        return None
+
+    # Önce tek satır: "/pdf 123 ALI VELI"
+    parts = first.split()
+    if len(parts) >= 4:
+        return parts[1], parts[2], " ".join(parts[3:])  # soyad birden fazla kelime olsa bile
+
+    # Sonra çok satır: "/pdf\nTC\nAD\nSOYAD"
+    rest = lines[1:]
+    if len(rest) >= 3:
+        tc = rest[0]
+        ad = rest[1]
+        soyad = " ".join(rest[2:])  # soyadı birden fazla kelime olabilir
+        return tc, ad, soyad
+
+    return None
+
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
     if not _check_group(update):
@@ -78,6 +120,60 @@ def cmd_whereami(update: Update, context: CallbackContext):
 def start_pdf(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
+
+    # 🔥 Tek mesajdan direkt PDF üretim denemesi
+    inline = parse_pdf_inline(update.message.text or "")
+    if inline:
+        tc_raw, name_raw, surname_raw = inline
+        update.message.reply_text("⏳ PDF hazırlanıyor")
+
+        # Türkçe doğru büyük harf
+        name_up = tr_upper(name_raw)
+        surname_up = tr_upper(surname_raw)
+
+        pdf_path = generate_pdf(tc_raw.strip(), name_up, surname_up)
+
+        if not pdf_path:
+            update.message.reply_text("❌ PDF oluşturulamadı.")
+            return ConversationHandler.END
+
+        # Boyut logu (opsiyonel)
+        try:
+            size_mb = os.path.getsize(pdf_path) / 1024 / 1024
+            log.info(f"PDF size: {size_mb:.2f} MB")
+        except Exception:
+            pass
+
+        # Gönderim (retry)
+        for attempt in range(1, 4):
+            try:
+                filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
+                with open(pdf_path, "rb") as f:
+                    update.message.reply_document(
+                        document=InputFile(f, filename=filename),
+                        timeout=180
+                    )
+                break
+            except (NetworkError, TimedOut) as e:
+                log.warning(f"send_document timeout/network (attempt {attempt}): {e}")
+                if attempt == 3:
+                    update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
+                else:
+                    time.sleep(2 * attempt)
+            except Exception as e:
+                log.exception(f"send_document failed: {e}")
+                update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
+                break
+
+        # tmp temizliği
+        try:
+            os.remove(pdf_path)
+        except Exception:
+            pass
+
+        return ConversationHandler.END
+
+    # ❓ Eski davranış: adım adım sor
     update.message.reply_text("Müşterinin TC numarasını yaz:")
     return TC
 
@@ -158,28 +254,54 @@ def cmd_cancel(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # ================== PDF OLUŞTURMA ==================
-def generate_pdf(tc: str, name: str, surname: str) -> str:
-    """
-    Siteye formla POST eder, Content-Type application/pdf ise geçici dosyaya çevirir ve yolu döner.
-    Hata olursa "" döner.
-    """
+def _save_if_pdf_like(resp) -> str:
+    """Yanıt PDF ise dosyaya kaydedip yolunu döner; aksi halde '' döner."""
     try:
-        data = {"tc": tc, "ad": name, "soyad": surname}
-        r = requests.post(PDF_URL, data=data, headers=HEADERS, timeout=60)
-
-        ct = (r.headers.get("Content-Type") or "").lower()
-        if r.status_code == 200 and "application/pdf" in ct:
+        ct = (resp.headers.get("Content-Type") or "").lower()
+        content = resp.content or b""
+        looks_pdf = (b"%PDF" in content[:10]) or ("application/pdf" in ct) or ("application/octet-stream" in ct)
+        if resp.status_code == 200 and looks_pdf and content:
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-            tmp.write(r.content)
+            tmp.write(content)
             tmp.close()
             return tmp.name
-        else:
-            # Hata durumunu logla (ilk 300 char)
-            log.error(f"PDF alınamadı | status={r.status_code} ct={ct} body={r.text[:300]}")
-            return ""
-    except Exception as e:
-        log.exception(f"generate_pdf hata: {e}")
         return ""
+    except Exception as e:
+        log.exception(f"_save_if_pdf_like hata: {e}")
+        return ""
+
+def generate_pdf(tc: str, name: str, surname: str) -> str:
+    """
+    Siteye POST eder, PDF gelirse geçici dosyaya yazar ve yolu döner.
+    1) x-www-form-urlencoded (data=)
+    2) JSON (json=) fallback
+    Content-Type yanlış gelse bile %PDF imzasından doğrular.
+    """
+    data = {"tc": tc, "ad": name, "soyad": surname}
+
+    # 1) Form-encoded dene
+    try:
+        r = requests.post(PDF_URL, data=data, headers=HEADERS, timeout=120)
+        path = _save_if_pdf_like(r)
+        if path:
+            return path
+        else:
+            log.error(f"[form] PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
+    except Exception as e:
+        log.exception(f"[form] generate_pdf hata: {e}")
+
+    # 2) JSON dene
+    try:
+        r2 = requests.post(PDF_URL, json=data, headers=HEADERS, timeout=120)
+        path2 = _save_if_pdf_like(r2)
+        if path2:
+            return path2
+        else:
+            log.error(f"[json] PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:300]}")
+    except Exception as e:
+        log.exception(f"[json] generate_pdf hata: {e}")
+
+    return ""
 
 # ================== ERROR HANDLER ==================
 def on_error(update: object, context: CallbackContext):
