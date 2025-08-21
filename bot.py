@@ -31,7 +31,7 @@ PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ✅ SADECE İZİN VERDİĞİN GRUP
-ALLOWED_CHAT_ID = {-1002950346446, -1002955588715}  # set yaptım (performans + 'in' kontrolü)
+ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}  # set yaptım (performans + 'in' kontrolü)
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
