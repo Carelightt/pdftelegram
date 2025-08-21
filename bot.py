@@ -30,8 +30,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ✅ SADECE İZİN VERDİĞİN GRUP
-ALLOWED_CHAT_ID = -1002950346446
+# ✅ SADECE İZİN VERDİĞİN GRUP VE KİŞİLER
+ALLOWED_CHAT_IDS = [-1002950346446, 6672759317]
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
