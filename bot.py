@@ -30,9 +30,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# ✅ SADECE İZİN VERDİĞİN GRUP VE KİŞİLER
-ALLOWED_CHAT_IDS = [-1002950346446, 6672759317]
-ALLOWED_USER_IDS = {6672759317}  # kişisel kullanıcı izni
+# ✅ SADECE İZİN VERDİĞİN GRUP
+ALLOWED_CHAT_ID = [-1002950346446, -1002955588715]
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
@@ -54,16 +53,14 @@ def tr_upper(s: str) -> str:
     return s.upper()
 
 def _check_group(update: Update) -> bool:
-    """İzinli grup/kullanıcı kontrolü. Değilse uyarı ver."""
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    user_id = update.effective_user.id if update.effective_user else None
-    if (chat_id in ALLOWED_CHAT_IDS) or (user_id in ALLOWED_USER_IDS):
-        return True
-    try:
-        update.message.reply_text("🚫 Hakkınız kapalıdır. Lütfen iletişime geçin @CengizzAtay")
-    except Exception:
-        pass
-    return False
+    """İzinli grup kontrolü. Değilse uyarı ver."""
+    if update.effective_chat and update.effective_chat.id != ALLOWED_CHAT_ID:
+        try:
+            update.message.reply_text("Hakkın kapalıdır destek için @CengizzAtay")
+        except Exception:
+            pass
+        return False
+    return True
 
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
