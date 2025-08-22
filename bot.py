@@ -107,7 +107,6 @@ def parse_kart_inline(text: str):
     if not text:
         return None
     lines = [l.strip() for l in text.strip().splitlines()]
-    # boş satırları tutmuyoruz
     lines = [l for l in lines if l]
     if not lines:
         return None
@@ -163,13 +162,11 @@ def start_pdf(update: Update, context: CallbackContext):
         for attempt in range(1, 4):
             try:
                 filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
-                base = (adsoyad or context.user_data.get("k_adsoyad") or "KART").strip().replace(" ", "_").upper()
-filename = f"{base}_KART.pdf"
-with open(pdf_path, "rb") as f:
-    update.message.reply_document(
-        document=InputFile(f, filename=filename),
-        timeout=180
-    )
+                with open(pdf_path, "rb") as f:
+                    update.message.reply_document(
+                        document=InputFile(f, filename=filename),
+                        timeout=180
+                    )
                 break
             except (NetworkError, TimedOut) as e:
                 log.warning(f"send_document timeout/network (attempt {attempt}): {e}")
@@ -278,7 +275,6 @@ def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
             "adres": adres,
             "ililce": ililce,
             "tarih": tarih,
-            # debug istersen aç: "debug": "0"
         }
         r = requests.post(KART_PDF_URL, data=data, headers=HEADERS, timeout=90)
         ct = (r.headers.get("Content-Type") or "").lower()
@@ -311,11 +307,12 @@ def start_kart(update: Update, context: CallbackContext):
 
         for attempt in range(1, 4):
             try:
-                # Backend tarafında zaten AD_SOYAD_KART.pdf olarak geliyor ama
-                # yine de güvenli olsun diye custom isim set etmiyoruz (server belirliyor).
+                # AD_SOYAD_KART.pdf olarak gönder
+                base = (adsoyad or "KART").strip().replace(" ", "_").upper()
+                filename = f"{base}_KART.pdf"
                 with open(pdf_path, "rb") as f:
                     update.message.reply_document(
-                        document=InputFile(f, filename=None),
+                        document=InputFile(f, filename=filename),
                         timeout=180
                     )
                 break
@@ -381,9 +378,11 @@ def get_k_tarih(update: Update, context: CallbackContext):
 
     for attempt in range(1, 4):
         try:
+            base = (context.user_data.get("k_adsoyad") or "KART").strip().replace(" ", "_").upper()
+            filename = f"{base}_KART.pdf"
             with open(pdf_path, "rb") as f:
                 update.message.reply_document(
-                    document=InputFile(f, filename=None),
+                    document=InputFile(f, filename=filename),
                     timeout=180
                 )
             break
