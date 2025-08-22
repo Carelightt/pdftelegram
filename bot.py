@@ -38,6 +38,8 @@ ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
+# /kart için durumlar
+K_ADSOYAD, K_ADRES, K_ILILCE, K_TARIH = range(4)
 
 # ================== LOG ==================
 logging.basicConfig(
@@ -253,6 +255,141 @@ def cmd_cancel(update: Update, context: CallbackContext):
     update.message.reply_text("İptal edildi.")
     return ConversationHandler.END
 
+# ================== KART DURUMU: /kart ==================
+KART_PDF_URL = "https://pdf-admin1.onrender.com/kart"
+
+def parse_kart_inline(text: str):
+    """
+    /kart komutunu tek mesajda çok satırlı formatta yakalar:
+        /kart
+        Ad Soyad
+        Adres
+        İl İlçe
+        Tarih
+    Başarılıysa (adsoyad, adres, ililce, tarih) döner; yoksa None.
+    """
+    if not text:
+        return None
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    if not lines or not lines[0].lower().startswith('/kart'):
+        return None
+    rest = lines[1:]
+    if len(rest) >= 4:
+        adsoyad = rest[0]
+        adres = rest[1]
+        ililce = rest[2]
+        tarih = rest[3]
+        return adsoyad, adres, ililce, tarih
+    return None
+
+def start_kart(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+
+    inline = parse_kart_inline(update.message.text or "")
+    if inline:
+        adsoyad, adres, ililce, tarih = inline
+        update.message.reply_text("⏳ Kart durumu PDF hazırlanıyor...")
+        pdf_path = generate_kart_pdf(adsoyad, adres, ililce, tarih)
+
+        if not pdf_path:
+            update.message.reply_text("❌ Kart PDF oluşturulamadı.")
+            return ConversationHandler.END
+
+        for attempt in range(1, 4):
+            try:
+                with open(pdf_path, "rb") as f:
+                    update.message.reply_document(
+                        document=InputFile(f, filename="kart_durumu.pdf"),
+                        timeout=180
+                    )
+                break
+            except (NetworkError, TimedOut) as e:
+                log.warning(f"kart send timeout/network (attempt {attempt}): {e}")
+                if attempt == 3:
+                    update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
+                else:
+                    time.sleep(2 * attempt)
+            except Exception as e:
+                log.exception(f"kart send failed: {e}")
+                update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
+                break
+
+        try:
+            os.remove(pdf_path)
+        except Exception:
+            pass
+
+        return ConversationHandler.END
+
+    # Adım adım sor
+    update.message.reply_text("Ad Soyad yaz:")
+    return K_ADSOYAD
+
+def get_k_adsoyad(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["k_adsoyad"] = update.message.text.strip()
+    update.message.reply_text("Adres yaz:")
+    return K_ADRES
+
+def get_k_adres(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["k_adres"] = update.message.text.strip()
+    update.message.reply_text("İl İlçe yaz:")
+    return K_ILILCE
+
+def get_k_ililce(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["k_ililce"] = update.message.text.strip()
+    update.message.reply_text("Tarih yaz (örn: 19.08.2025):")
+    return K_TARIH
+
+def get_k_tarih(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["k_tarih"] = update.message.text.strip()
+    update.message.reply_text("⏳ Kart durumu PDF hazırlanıyor...")
+
+    pdf_path = generate_kart_pdf(
+        context.user_data["k_adsoyad"],
+        context.user_data["k_adres"],
+        context.user_data["k_ililce"],
+        context.user_data["k_tarih"]
+    )
+
+    if not pdf_path:
+        update.message.reply_text("❌ Kart PDF oluşturulamadı.")
+        return ConversationHandler.END
+
+    for attempt in range(1, 4):
+        try:
+            with open(pdf_path, "rb") as f:
+                update.message.reply_document(
+                    document=InputFile(f, filename="kart_durumu.pdf"),
+                    timeout=180
+                )
+            break
+        except (NetworkError, TimedOut) as e:
+            log.warning(f"kart send timeout/network (attempt {attempt}): {e}")
+            if attempt == 3:
+                update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
+            else:
+                time.sleep(2 * attempt)
+        except Exception as e:
+            log.exception(f"kart send failed: {e}")
+            update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
+            break
+
+    try:
+        os.remove(pdf_path)
+    except Exception:
+        pass
+
+    return ConversationHandler.END
+
 # ================== PDF OLUŞTURMA ==================
 def _save_if_pdf_like(resp) -> str:
     """Yanıt PDF ise dosyaya kaydedip yolunu döner; aksi halde '' döner."""
@@ -303,6 +440,37 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
 
     return ""
 
+def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
+    """
+    Kart durumu PDF endpoint'ine POST eder ve PDF'i döner.
+    Önce form-encoded, sonra JSON dener. %PDF imzasıyla doğrular.
+    """
+    payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih}
+
+    # 1) Form-encoded
+    try:
+        r = requests.post(KART_PDF_URL, data=payload, headers=HEADERS, timeout=120)
+        path = _save_if_pdf_like(r)
+        if path:
+            return path
+        else:
+            log.error(f"[form] KART PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
+    except Exception as e:
+        log.exception(f"[form] generate_kart_pdf hata: {e}")
+
+    # 2) JSON
+    try:
+        r2 = requests.post(KART_PDF_URL, json=payload, headers=HEADERS, timeout=120)
+        path2 = _save_if_pdf_like(r2)
+        if path2:
+            return path2
+        else:
+            log.error(f"[json] KART PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:300]}")
+    except Exception as e:
+        log.exception(f"[json] generate_kart_pdf hata: {e}")
+
+    return ""
+
 # ================== ERROR HANDLER ==================
 def on_error(update: object, context: CallbackContext):
     log.exception("Unhandled error", exc_info=context.error)
@@ -342,9 +510,23 @@ def main():
         conversation_timeout=180,
     )
 
+    # /kart için ayrı conversation
+    conv_kart = ConversationHandler(
+        entry_points=[CommandHandler("kart", start_kart)],
+        states={
+            K_ADSOYAD: [MessageHandler(Filters.text & ~Filters.command, get_k_adsoyad)],
+            K_ADRES:   [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
+            K_ILILCE:  [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
+            K_TARIH:   [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        conversation_timeout=180,
+    )
+
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("whereami", cmd_whereami))  # teşhis komutu
     dp.add_handler(conv)
+    dp.add_handler(conv_kart)
 
     log.info("Bot açılıyor...")
     updater.start_polling(drop_pending_updates=True)  # pending update'leri at
