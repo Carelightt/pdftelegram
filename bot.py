@@ -236,17 +236,31 @@ def cmd_cancel(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # ================== KART DURUMU: /kart ==================
+# 🔁 backend kart pdf endpoint
 KART_PDF_URL = "https://pdf-admin1.onrender.com/generate2"
 
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
+    """
+    /generate2 PDF-lib ile kart üretir. Backend ekstra koordinat alanları bekliyor.
+    Bunları default (mm) değerlerle gönderiyoruz; gerekirse ayarlanır.
+    """
     try:
         data = {
             "adsoyad": adsoyad,
             "adres": adres,
             "ililce": ililce,
-            "tarih": tarih
+            "tarih": tarih,
+            # ---- tarih kutusu koordinatları (mm) ----
+            "tarih_sol_alt_x": "126",
+            "tarih_sol_alt_y": "78",
+            "tarih_sol_ust_x": "126",
+            "tarih_sol_ust_y": "70",
+            "tarih_sag_alt_x": "176",
+            "tarih_sag_alt_y": "78",
+            "tarih_sag_ust_x": "176",
+            "tarih_sag_ust_y": "70",
         }
-        r = requests.post(KART_PDF_URL, data=data, headers=HEADERS, timeout=60)
+        r = requests.post(KART_PDF_URL, data=data, headers=HEADERS, timeout=90)
         ct = (r.headers.get("Content-Type") or "").lower()
         if r.status_code == 200 and "pdf" in ct:
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
@@ -263,7 +277,6 @@ def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
 def start_kart(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
-
     update.message.reply_text("Ad Soyad yaz:")
     return K_ADSOYAD
 
