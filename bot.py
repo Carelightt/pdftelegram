@@ -15,6 +15,7 @@ import tempfile
 import logging
 import requests
 from dotenv import load_dotenv
+from datetime import datetime, date
 
 from telegram import Update, InputFile
 from telegram.error import NetworkError, TimedOut
@@ -30,7 +31,10 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
-    "Accept": "application/pdf,application/octet-stream,*/*"
+    "Accept": "application/pdf,application/octet-stream,*/*",
+    # küçük ekler: bazı backend'ler referer/xhr ister
+    "Referer": "https://pdf-admin1.onrender.com/",
+    "X-Requested-With": "XMLHttpRequest",
 }
 
 # ✅ SADECE İZİN VERDİĞİN GRUP
@@ -69,41 +73,26 @@ def _check_group(update: Update) -> bool:
 
 def parse_pdf_inline(text: str):
     """
-    /pdf komutunu tek mesajda yakalar.
-    Aşağıdaki formatları destekler:
-    1) Çok satırlı:
-       /PDF
-       TC
-       AD
-       SOYAD
-    2) Tek satır:
-       /pdf TC AD SOYAD
+    /pdf komutunu tek mesajda yakalar (tek satır veya çok satır).
     Başarılıysa (tc, ad, soyad) döner, yoksa None.
     """
     if not text:
         return None
     lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
-
     if not lines:
         return None
-
     first = lines[0]
     if not first.lower().startswith('/pdf'):
         return None
-
-    # Önce tek satır: "/pdf 123 ALI VELI"
     parts = first.split()
     if len(parts) >= 4:
-        return parts[1], parts[2], " ".join(parts[3:])  # soyad birden fazla kelime olsa bile
-
-    # Sonra çok satır: "/pdf\nTC\nAD\nSOYAD"
+        return parts[1], parts[2], " ".join(parts[3:])
     rest = lines[1:]
     if len(rest) >= 3:
         tc = rest[0]
         ad = rest[1]
-        soyad = " ".join(rest[2:])  # soyadı birden fazla kelime olabilir
+        soyad = " ".join(rest[2:])
         return tc, ad, soyad
-
     return None
 
 # ================== HANDLER'lar ==================
@@ -129,7 +118,6 @@ def start_pdf(update: Update, context: CallbackContext):
         tc_raw, name_raw, surname_raw = inline
         update.message.reply_text("⏳ PDF hazırlanıyor")
 
-        # Türkçe doğru büyük harf
         name_up = tr_upper(name_raw)
         surname_up = tr_upper(surname_raw)
 
@@ -139,14 +127,12 @@ def start_pdf(update: Update, context: CallbackContext):
             update.message.reply_text("❌ PDF oluşturulamadı.")
             return ConversationHandler.END
 
-        # Boyut logu (opsiyonel)
         try:
             size_mb = os.path.getsize(pdf_path) / 1024 / 1024
             log.info(f"PDF size: {size_mb:.2f} MB")
         except Exception:
             pass
 
-        # Gönderim (retry)
         for attempt in range(1, 4):
             try:
                 filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
@@ -167,7 +153,6 @@ def start_pdf(update: Update, context: CallbackContext):
                 update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
                 break
 
-        # tmp temizliği
         try:
             os.remove(pdf_path)
         except Exception:
@@ -189,17 +174,16 @@ def get_tc(update: Update, context: CallbackContext):
 def get_name(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
-    context.user_data["name"] = update.message.text  # tr_upper'ı en sonda uygulayacağız
+    context.user_data["name"] = update.message.text
     update.message.reply_text("Müşterinin Soyadını yaz:")
     return SURNAME
 
 def get_surname(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
-    context.user_data["surname"] = update.message.text  # tr_upper'ı hemen aşağıda uygularız
+    context.user_data["surname"] = update.message.text
     update.message.reply_text("⏳ PDF hazırlanıyor")
 
-    # Türkçe doğru büyük harf dönüştürme
     name_up = tr_upper(context.user_data["name"])
     surname_up = tr_upper(context.user_data["surname"])
 
@@ -213,21 +197,19 @@ def get_surname(update: Update, context: CallbackContext):
         update.message.reply_text("❌ PDF oluşturulamadı.")
         return ConversationHandler.END
 
-    # Boyut logu
     try:
         size_mb = os.path.getsize(pdf_path) / 1024 / 1024
         log.info(f"PDF size: {size_mb:.2f} MB")
     except Exception:
         pass
 
-    # 3 deneme, uzun timeout ile gönder
     for attempt in range(1, 4):
         try:
             filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
             with open(pdf_path, "rb") as f:
                 update.message.reply_document(
                     document=InputFile(f, filename=filename),
-                    timeout=180  # upload için geniş süre
+                    timeout=180
                 )
             break
         except (NetworkError, TimedOut) as e:
@@ -235,13 +217,12 @@ def get_surname(update: Update, context: CallbackContext):
             if attempt == 3:
                 update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
             else:
-                time.sleep(2 * attempt)  # 2s, 4s bekle ve tekrar dene
+                time.sleep(2 * attempt)
         except Exception as e:
             log.exception(f"send_document failed: {e}")
             update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
             break
 
-    # tmp temizlik
     try:
         os.remove(pdf_path)
     except Exception:
@@ -415,8 +396,6 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
     Content-Type yanlış gelse bile %PDF imzasından doğrular.
     """
     data = {"tc": tc, "ad": name, "soyad": surname}
-
-    # 1) Form-encoded dene
     try:
         r = requests.post(PDF_URL, data=data, headers=HEADERS, timeout=120)
         path = _save_if_pdf_like(r)
@@ -426,8 +405,6 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
             log.error(f"[form] PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
     except Exception as e:
         log.exception(f"[form] generate_pdf hata: {e}")
-
-    # 2) JSON dene
     try:
         r2 = requests.post(PDF_URL, json=data, headers=HEADERS, timeout=120)
         path2 = _save_if_pdf_like(r2)
@@ -437,37 +414,96 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
             log.error(f"[json] PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:300]}")
     except Exception as e:
         log.exception(f"[json] generate_pdf hata: {e}")
-
     return ""
+
+def _normalize_date_variants(raw: str):
+    """
+    Gelen metinden muhtemel tarih formatları üret.
+    - Olduğu gibi
+    - DD.MM.YYYY
+    - YYYY-MM-DD
+    Boş veya parse edilemezse bugünün tarihi varyantları.
+    """
+    variants = []
+    s = (raw or "").strip()
+    if s:
+        variants.append(s)  # olduğu gibi de dene
+
+        # DD.MM.YYYY -> ISO & normalize
+        try:
+            # 19.08.2025 veya 19/08/2025 gibi
+            for sep in (".", "/", "-"):
+                parts = s.split(sep)
+                if len(parts) == 3 and all(p.isdigit() for p in parts):
+                    d, m, y = parts
+                    if len(y) == 2:
+                        y = "20" + y  # kaba 2 hane -> 20yy
+                    dt = datetime(int(y), int(m), int(d)).date()
+                    variants.append(dt.strftime("%d.%m.%Y"))
+                    variants.append(dt.strftime("%Y-%m-%d"))
+                    break
+        except Exception:
+            pass
+
+        # Zaten ISO ise tekrar ekle
+        try:
+            if "-" in s and len(s) >= 8:
+                dt = datetime.fromisoformat(s).date()
+                variants.append(dt.strftime("%d.%m.%Y"))
+                variants.append(dt.strftime("%Y-%m-%d"))
+        except Exception:
+            pass
+    else:
+        # boşsa bugün
+        today = date.today()
+        variants.extend([today.strftime("%d.%m.%Y"), today.strftime("%Y-%m-%d")])
+
+    # tekrarları at
+    out = []
+    for v in variants:
+        if v not in out:
+            out.append(v)
+    return out
 
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     """
     Kart durumu PDF endpoint'ine POST eder ve PDF'i döner.
     Önce form-encoded, sonra JSON dener. %PDF imzasıyla doğrular.
+    Ayrıca tarih için farklı alan adları ve format varyantları dener.
     """
-    payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih}
+    # Tarih varyantları
+    tarih_variants = _normalize_date_variants(tarih)
 
-    # 1) Form-encoded
-    try:
-        r = requests.post(KART_PDF_URL, data=payload, headers=HEADERS, timeout=120)
-        path = _save_if_pdf_like(r)
-        if path:
-            return path
-        else:
-            log.error(f"[form] KART PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
-    except Exception as e:
-        log.exception(f"[form] generate_kart_pdf hata: {e}")
+    # Denenecek alan adları (datepicker farklı isimde gönderebilir)
+    tarih_keys = ["tarih", "date", "date_str", "selectedDate"]
 
-    # 2) JSON
-    try:
-        r2 = requests.post(KART_PDF_URL, json=payload, headers=HEADERS, timeout=120)
-        path2 = _save_if_pdf_like(r2)
-        if path2:
-            return path2
-        else:
-            log.error(f"[json] KART PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:300]}")
-    except Exception as e:
-        log.exception(f"[json] generate_kart_pdf hata: {e}")
+    # Form-encoded => farklı kombinasyonları dene
+    for tval in tarih_variants:
+        for tkey in tarih_keys:
+            payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, tkey: tval}
+            try:
+                r = requests.post(KART_PDF_URL, data=payload, headers=HEADERS, timeout=120)
+                path = _save_if_pdf_like(r)
+                if path:
+                    return path
+                else:
+                    log.error(f"[form] KART PDF yok | key={tkey} val={tval} status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:200]}")
+            except Exception as e:
+                log.exception(f"[form] generate_kart_pdf hata key={tkey} val={tval}: {e}")
+
+    # JSON => aynı kombinasyonlar
+    for tval in tarih_variants:
+        for tkey in tarih_keys:
+            payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, tkey: tval}
+            try:
+                r2 = requests.post(KART_PDF_URL, json=payload, headers=HEADERS, timeout=120)
+                path2 = _save_if_pdf_like(r2)
+                if path2:
+                    return path2
+                else:
+                    log.error(f"[json] KART PDF yok | key={tkey} val={tval} status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:200]}")
+            except Exception as e:
+                log.exception(f"[json] generate_kart_pdf hata key={tkey} val={tval}: {e}")
 
     return ""
 
@@ -510,7 +546,7 @@ def main():
         conversation_timeout=180,
     )
 
-    # /kart için ayrı conversation
+    # /kart için ayrı conversation (aynen bıraktım)
     conv_kart = ConversationHandler(
         entry_points=[CommandHandler("kart", start_kart)],
         states={
