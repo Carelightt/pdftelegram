@@ -94,11 +94,39 @@ def parse_pdf_inline(text: str):
         return tc, ad, soyad
     return None
 
+def parse_kart_inline(text: str):
+    """
+    /kart için tek mesaj, alt alta 4 satır:
+      /kart
+      Ad Soyad
+      Adres
+      İl İlçe
+      Tarih
+    Dönen tuple: (adsoyad, adres, ililce, tarih) veya None
+    """
+    if not text:
+        return None
+    lines = [l.strip() for l in text.strip().splitlines()]
+    # boş satırları tutmuyoruz
+    lines = [l for l in lines if l]
+    if not lines:
+        return None
+    if not lines[0].lower().startswith('/kart'):
+        return None
+    rest = lines[1:]
+    if len(rest) >= 4:
+        adsoyad = rest[0]
+        adres   = rest[1]
+        ililce  = rest[2]
+        tarih   = rest[3]
+        return adsoyad, adres, ililce, tarih
+    return None
+
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
-    update.message.reply_text("Başlamak için /pdf yaz lütfen.")
+    update.message.reply_text("Başlamak için /pdf veya /kart yaz.")
     return ConversationHandler.END
 
 def cmd_whereami(update: Update, context: CallbackContext):
@@ -236,13 +264,11 @@ def cmd_cancel(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # ================== KART DURUMU: /kart ==================
-# 🔁 backend kart pdf endpoint
 KART_PDF_URL = "https://pdf-admin1.onrender.com/generate2"
 
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     """
-    /generate2 PDF-lib ile kart üretir. Backend ekstra koordinat alanları bekliyor.
-    Bunları default (mm) değerlerle gönderiyoruz; gerekirse ayarlanır.
+    /generate2'ye post atar. Backend sabit koordinatları zaten kullanıyor.
     """
     try:
         data = {
@@ -250,15 +276,7 @@ def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
             "adres": adres,
             "ililce": ililce,
             "tarih": tarih,
-            # ---- tarih kutusu koordinatları (mm) ----
-            "tarih_sol_alt_x": "126",
-            "tarih_sol_alt_y": "78",
-            "tarih_sol_ust_x": "126",
-            "tarih_sol_ust_y": "70",
-            "tarih_sag_alt_x": "176",
-            "tarih_sag_alt_y": "78",
-            "tarih_sag_ust_x": "176",
-            "tarih_sag_ust_y": "70",
+            # debug istersen aç: "debug": "0"
         }
         r = requests.post(KART_PDF_URL, data=data, headers=HEADERS, timeout=90)
         ct = (r.headers.get("Content-Type") or "").lower()
@@ -277,6 +295,47 @@ def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
 def start_kart(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
+
+    # 🔥 Tek mesaj alt alta 4 satır formatını dene
+    inline = parse_kart_inline(update.message.text or "")
+    if inline:
+        adsoyad, adres, ililce, tarih = inline
+        update.message.reply_text("⏳ Kart durumu PDF hazırlanıyor...")
+        pdf_path = generate_kart_pdf(adsoyad, adres, ililce, tarih)
+
+        if not pdf_path:
+            update.message.reply_text("❌ Kart PDF oluşturulamadı.")
+            return ConversationHandler.END
+
+        for attempt in range(1, 4):
+            try:
+                # Backend tarafında zaten AD_SOYAD_KART.pdf olarak geliyor ama
+                # yine de güvenli olsun diye custom isim set etmiyoruz (server belirliyor).
+                with open(pdf_path, "rb") as f:
+                    update.message.reply_document(
+                        document=InputFile(f, filename=None),
+                        timeout=180
+                    )
+                break
+            except (NetworkError, TimedOut) as e:
+                log.warning(f"kart send timeout/network (attempt {attempt}): {e}")
+                if attempt == 3:
+                    update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
+                else:
+                    time.sleep(2 * attempt)
+            except Exception as e:
+                log.exception(f"kart send failed: {e}")
+                update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
+                break
+
+        try:
+            os.remove(pdf_path)
+        except Exception:
+            pass
+
+        return ConversationHandler.END
+
+    # Inline değilse eski akış
     update.message.reply_text("Ad Soyad yaz:")
     return K_ADSOYAD
 
@@ -322,7 +381,7 @@ def get_k_tarih(update: Update, context: CallbackContext):
         try:
             with open(pdf_path, "rb") as f:
                 update.message.reply_document(
-                    document=InputFile(f, filename="kart_durumu.pdf"),
+                    document=InputFile(f, filename=None),
                     timeout=180
                 )
             break
