@@ -32,7 +32,6 @@ PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/pdf,application/octet-stream,*/*",
-    # küçük ekler: bazı backend'ler referer/xhr ister
     "Referer": "https://pdf-admin1.onrender.com/",
     "X-Requested-With": "XMLHttpRequest",
 }
@@ -237,7 +236,7 @@ def cmd_cancel(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # ================== KART DURUMU: /kart ==================
-KART_PDF_URL = "https://pdf-admin1.onrender.com/kart"
+KART_PDF_URL_BASE = "https://pdf-admin1.onrender.com"
 
 def parse_kart_inline(text: str):
     """
@@ -418,33 +417,73 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
 
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     """
-    Kart durumu PDF endpoint'ine POST eder ve PDF'i döner.
-    Tarih artık elle yazılıyor: olduğu gibi 'tarih' anahtarıyla gönderiyoruz.
-    Önce form-encoded, sonra JSON dener. %PDF imzasıyla doğrular.
+    KART DURUMU buton akışını taklit eder:
+      1) Session aç → sayfayı GET et (cookie/CSRF vs.)
+      2) Birkaç muhtemel form endpoint’ine POST dene
+      3) Birkaç muhtemel alan adı kombinasyonu dene
+    PDF gelirse dosya yolunu döner, yoksa "".
     """
-    payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih}
-
-    # 1) Form-encoded
+    sess = requests.Session()
     try:
-        r = requests.post(KART_PDF_URL, data=payload, headers=HEADERS, timeout=120)
-        path = _save_if_pdf_like(r)
-        if path:
-            return path
-        else:
-            log.error(f"[form] KART PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
-    except Exception as e:
-        log.exception(f"[form] generate_kart_pdf hata: {e}")
+        # 1) Ana sayfa veya kart sayfasına GET: cookie vs. için
+        for path in ["", "/kart", "/kart-durumu", "/kart_durumu", "/kartdurumu"]:
+            try:
+                sess.get(f"{KART_PDF_URL_BASE}{path}", headers=HEADERS, timeout=30)
+            except Exception:
+                pass
 
-    # 2) JSON
-    try:
-        r2 = requests.post(KART_PDF_URL, json=payload, headers=HEADERS, timeout=120)
-        path2 = _save_if_pdf_like(r2)
-        if path2:
-            return path2
-        else:
-            log.error(f"[json] KART PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:300]}")
+        # 2) Muhtemel endpoint’ler
+        endpoints = [
+            f"{KART_PDF_URL_BASE}/kart",
+            f"{KART_PDF_URL_BASE}/kart-durumu",
+            f"{KART_PDF_URL_BASE}/kart_durumu",
+            f"{KART_PDF_URL_BASE}/kartdurumu",
+        ]
+
+        # 3) Muhtemel alan adları (backende göre değişebiliyor)
+        field_variants = [
+            {"adsoyad": adsoyad, "adres": adres, "il": ililce.split()[0] if " " in ililce else ililce, "ilce": " ".join(ililce.split()[1:]) if " " in ililce else "", "tarih": tarih},
+            {"ad_soyad": adsoyad, "adres": adres, "il": ililce.split()[0] if " " in ililce else ililce, "ilce": " ".join(ililce.split()[1:]) if " " in ililce else "", "tarih": tarih},
+            {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih},
+        ]
+
+        # Bazı backendler buton ismi/type bekler
+        extras = [
+            {},
+            {"submit": "KART DURUMU"},
+            {"type": "kart"},
+            {"submit": "KART DURUMU", "type": "kart"},
+        ]
+
+        # 4) POST denemeleri (form-encoded -> JSON)
+        for url in endpoints:
+            for fields in field_variants:
+                for extra in extras:
+                    payload = {**fields, **extra}
+                    # form-encoded
+                    try:
+                        r = sess.post(url, data=payload, headers={**HEADERS, "Referer": url}, timeout=90)
+                        path = _save_if_pdf_like(r)
+                        if path:
+                            return path
+                        else:
+                            log.error(f"[form kart] url={url} status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:200]}")
+                    except Exception as e:
+                        log.exception(f"[form kart] url={url} hata: {e}")
+
+                    # JSON
+                    try:
+                        r2 = sess.post(url, json=payload, headers={**HEADERS, "Referer": url}, timeout=90)
+                        path2 = _save_if_pdf_like(r2)
+                        if path2:
+                            return path2
+                        else:
+                            log.error(f"[json kart] url={url} status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:200]}")
+                    except Exception as e:
+                        log.exception(f"[json kart] url={url} hata: {e}")
+
     except Exception as e:
-        log.exception(f"[json] generate_kart_pdf hata: {e}")
+        log.exception(f"generate_kart_pdf genel hata: {e}")
 
     return ""
 
