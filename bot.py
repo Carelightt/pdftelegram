@@ -236,7 +236,7 @@ def cmd_cancel(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # ================== KART DURUMU: /kart ==================
-KART_PDF_URL = "https://pdf-admin1.onrender.com/kartdurum"
+KART_PDF_URL = "https://pdf-admin1.onrender.com/generate2"
 
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     try:
