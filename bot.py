@@ -264,43 +264,6 @@ def start_kart(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
 
-    inline = parse_kart_inline(update.message.text or "")
-    if inline:
-        adsoyad, adres, ililce, tarih = inline
-        update.message.reply_text("⏳ Kart durumu PDF hazırlanıyor...")
-        pdf_path = generate_kart_pdf(adsoyad, adres, ililce, tarih)
-
-        if not pdf_path:
-            update.message.reply_text("❌ Kart PDF oluşturulamadı.")
-            return ConversationHandler.END
-
-        for attempt in range(1, 4):
-            try:
-                with open(pdf_path, "rb") as f:
-                    update.message.reply_document(
-                        document=InputFile(f, filename="kart_durumu.pdf"),
-                        timeout=180
-                    )
-                break
-            except (NetworkError, TimedOut) as e:
-                log.warning(f"kart send timeout/network (attempt {attempt}): {e}")
-                if attempt == 3:
-                    update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
-                else:
-                    time.sleep(2 * attempt)
-            except Exception as e:
-                log.exception(f"kart send failed: {e}")
-                update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
-                break
-
-        try:
-            os.remove(pdf_path)
-        except Exception:
-            pass
-
-        return ConversationHandler.END
-
-    # Adım adım sor
     update.message.reply_text("Ad Soyad yaz:")
     return K_ADSOYAD
 
@@ -387,12 +350,6 @@ def _save_if_pdf_like(resp) -> str:
         return ""
 
 def generate_pdf(tc: str, name: str, surname: str) -> str:
-    """
-    Siteye POST eder, PDF gelirse geçici dosyaya yazar ve yolu döner.
-    1) x-www-form-urlencoded (data=)
-    2) JSON (json=) fallback
-    Content-Type yanlış gelse bile %PDF imzasından doğrular.
-    """
     data = {"tc": tc, "ad": name, "soyad": surname}
     try:
         r = requests.post(PDF_URL, data=data, headers=HEADERS, timeout=120)
@@ -414,83 +371,6 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
         log.exception(f"[json] generate_pdf hata: {e}")
     return ""
 
-def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
-    """
-    KART DURUMU üretimi: session ile olası endpoint + alan adları + yöntemler.
-    1) POST form
-    2) POST json
-    3) GET querystring ile indirme (bazı siteler direkt indirme yapar)
-    """
-    sess = requests.Session()
-    base = KART_PDF_URL_BASE
-    endpoints = [
-        f"{base}/kart",
-        f"{base}/kart-durumu",
-        f"{base}/kart_durumu",
-        f"{base}/kartdurumu",
-        f"{base}/kart.pdf",
-        f"{base}/kartdurumu.pdf",
-    ]
-
-    # Alan varyantları (en muhtemelden az muhtemele)
-    field_variants = [
-        {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih},
-        {"ad_soyad": adsoyad, "adres": adres, "il_ilce": ililce, "tarih": tarih},
-        {"isimsoyisim": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih},
-        # Ayrı alanlar
-        # ad/soyad ayrıştır
-        (lambda fn: (lambda a: {"ad": a[0], "soyad": a[1], "adres": adres, "il": ililce.split()[0] if " " in ililce else ililce, "ilce": " ".join(ililce.split()[1:]) if " " in ililce else "", "tarih": tarih}))(adsoyad.rsplit(" ", 1) if " " in adsoyad.strip() else (adsoyad, ""))(),
-        {"name": adsoyad, "address": adres, "city": ililce, "date": tarih},
-        {"fullname": adsoyad, "address": adres, "city": ililce, "date": tarih},
-    ]
-
-    # Ön ısınma: ana sayfa/kart sayfası GET (cookie/CSRF için)
-    for warm in ["", "/kart", "/kart-durumu", "/kart_durumu", "/kartdurumu"]:
-        url = f"{base}{warm}"
-        try:
-            sess.get(url, headers=HEADERS, timeout=15)
-        except Exception:
-            pass
-
-    # 1) POST form => 2) POST json
-    for url in endpoints:
-        for payload in field_variants:
-            # form-encoded
-            try:
-                r = sess.post(url, data=payload, headers={**HEADERS, "Referer": url}, timeout=90)
-                path = _save_if_pdf_like(r)
-                if path:
-                    return path
-                else:
-                    log.error(f"[form kart] url={url} status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:200]} keys={list(payload.keys())}")
-            except Exception as e:
-                log.exception(f"[form kart] url={url} keys={list(payload.keys())} hata: {e}")
-            # json
-            try:
-                r2 = sess.post(url, json=payload, headers={**HEADERS, "Referer": url}, timeout=90)
-                path2 = _save_if_pdf_like(r2)
-                if path2:
-                    return path2
-                else:
-                    log.error(f"[json kart] url={url} status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:200]} keys={list(payload.keys())}")
-            except Exception as e:
-                log.exception(f"[json kart] url={url} keys={list(payload.keys())} hata: {e}")
-
-    # 3) GET querystring (örn: /kart.pdf?adsoyad=...&adres=... )
-    for url in endpoints:
-        for payload in field_variants:
-            try:
-                r = sess.get(url, params=payload, headers={**HEADERS, "Referer": url}, timeout=60)
-                path = _save_if_pdf_like(r)
-                if path:
-                    return path
-                else:
-                    log.error(f"[get kart] url={url} status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:200]} keys={list(payload.keys())}")
-            except Exception as e:
-                log.exception(f"[get kart] url={url} keys={list(payload.keys())} hata: {e}")
-
-    return ""
-
 # ================== ERROR HANDLER ==================
 def on_error(update: object, context: CallbackContext):
     log.exception("Unhandled error", exc_info=context.error)
@@ -500,7 +380,6 @@ def main():
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN .env'de yok!")
 
-    # Geniş timeout'lar ve connection pool
     request_kwargs = {
         "con_pool_size": 8,
         "connect_timeout": 30,
@@ -509,7 +388,6 @@ def main():
 
     updater = Updater(BOT_TOKEN, use_context=True, request_kwargs=request_kwargs)
 
-    # Eski webhook’u temizle (çatışma olmasın)
     try:
         updater.bot.delete_webhook(drop_pending_updates=True)
     except Exception as e:
@@ -518,7 +396,6 @@ def main():
     dp = updater.dispatcher
     dp.add_error_handler(on_error)
 
-    # Konuşma akışı
     conv = ConversationHandler(
         entry_points=[CommandHandler("pdf", start_pdf)],
         states={
@@ -528,29 +405,29 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
         conversation_timeout=180,
+        allow_reentry=True
     )
 
-    # /kart için ayrı conversation (aynen)
-   conv_kart = ConversationHandler(
-    entry_points=[CommandHandler("kart", start_kart)],
-    states={
-        K_ADSOYAD: [MessageHandler(Filters.text & ~Filters.command, get_k_adsoyad)],
-        K_ADRES:   [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
-        K_ILILCE:  [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
-        K_TARIH:   [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
-    },
-    fallbacks=[CommandHandler("cancel", cmd_cancel)],  # ✅ buraya da eklendi
-    conversation_timeout=180,
-    allow_reentry=True   # ✅ aynı komutu tekrar yazınca sıfırlar
-)
+    conv_kart = ConversationHandler(
+        entry_points=[CommandHandler("kart", start_kart)],
+        states={
+            K_ADSOYAD: [MessageHandler(Filters.text & ~Filters.command, get_k_adsoyad)],
+            K_ADRES:   [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
+            K_ILILCE:  [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
+            K_TARIH:   [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        conversation_timeout=180,
+        allow_reentry=True
+    )
 
     dp.add_handler(CommandHandler("start", cmd_start))
-    dp.add_handler(CommandHandler("whereami", cmd_whereami))  # teşhis komutu
+    dp.add_handler(CommandHandler("whereami", cmd_whereami))
     dp.add_handler(conv)
     dp.add_handler(conv_kart)
 
     log.info("Bot açılıyor...")
-    updater.start_polling(drop_pending_updates=True)  # pending update'leri at
+    updater.start_polling(drop_pending_updates=True)
     updater.idle()
 
 if __name__ == "__main__":
