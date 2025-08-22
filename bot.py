@@ -325,7 +325,7 @@ def get_k_ililce(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
     context.user_data["k_ililce"] = update.message.text.strip()
-    update.message.reply_text("Tarih yaz (örn: 19.08.2025):")
+    update.message.reply_text("Tarih yaz:")
     return K_TARIH
 
 def get_k_tarih(update: Update, context: CallbackContext):
@@ -416,94 +416,35 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
         log.exception(f"[json] generate_pdf hata: {e}")
     return ""
 
-def _normalize_date_variants(raw: str):
-    """
-    Gelen metinden muhtemel tarih formatları üret.
-    - Olduğu gibi
-    - DD.MM.YYYY
-    - YYYY-MM-DD
-    Boş veya parse edilemezse bugünün tarihi varyantları.
-    """
-    variants = []
-    s = (raw or "").strip()
-    if s:
-        variants.append(s)  # olduğu gibi de dene
-
-        # DD.MM.YYYY -> ISO & normalize
-        try:
-            # 19.08.2025 veya 19/08/2025 gibi
-            for sep in (".", "/", "-"):
-                parts = s.split(sep)
-                if len(parts) == 3 and all(p.isdigit() for p in parts):
-                    d, m, y = parts
-                    if len(y) == 2:
-                        y = "20" + y  # kaba 2 hane -> 20yy
-                    dt = datetime(int(y), int(m), int(d)).date()
-                    variants.append(dt.strftime("%d.%m.%Y"))
-                    variants.append(dt.strftime("%Y-%m-%d"))
-                    break
-        except Exception:
-            pass
-
-        # Zaten ISO ise tekrar ekle
-        try:
-            if "-" in s and len(s) >= 8:
-                dt = datetime.fromisoformat(s).date()
-                variants.append(dt.strftime("%d.%m.%Y"))
-                variants.append(dt.strftime("%Y-%m-%d"))
-        except Exception:
-            pass
-    else:
-        # boşsa bugün
-        today = date.today()
-        variants.extend([today.strftime("%d.%m.%Y"), today.strftime("%Y-%m-%d")])
-
-    # tekrarları at
-    out = []
-    for v in variants:
-        if v not in out:
-            out.append(v)
-    return out
-
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     """
     Kart durumu PDF endpoint'ine POST eder ve PDF'i döner.
+    Tarih artık elle yazılıyor: olduğu gibi 'tarih' anahtarıyla gönderiyoruz.
     Önce form-encoded, sonra JSON dener. %PDF imzasıyla doğrular.
-    Ayrıca tarih için farklı alan adları ve format varyantları dener.
     """
-    # Tarih varyantları
-    tarih_variants = _normalize_date_variants(tarih)
+    payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih}
 
-    # Denenecek alan adları (datepicker farklı isimde gönderebilir)
-    tarih_keys = ["tarih", "date", "date_str", "selectedDate"]
+    # 1) Form-encoded
+    try:
+        r = requests.post(KART_PDF_URL, data=payload, headers=HEADERS, timeout=120)
+        path = _save_if_pdf_like(r)
+        if path:
+            return path
+        else:
+            log.error(f"[form] KART PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
+    except Exception as e:
+        log.exception(f"[form] generate_kart_pdf hata: {e}")
 
-    # Form-encoded => farklı kombinasyonları dene
-    for tval in tarih_variants:
-        for tkey in tarih_keys:
-            payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, tkey: tval}
-            try:
-                r = requests.post(KART_PDF_URL, data=payload, headers=HEADERS, timeout=120)
-                path = _save_if_pdf_like(r)
-                if path:
-                    return path
-                else:
-                    log.error(f"[form] KART PDF yok | key={tkey} val={tval} status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:200]}")
-            except Exception as e:
-                log.exception(f"[form] generate_kart_pdf hata key={tkey} val={tval}: {e}")
-
-    # JSON => aynı kombinasyonlar
-    for tval in tarih_variants:
-        for tkey in tarih_keys:
-            payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, tkey: tval}
-            try:
-                r2 = requests.post(KART_PDF_URL, json=payload, headers=HEADERS, timeout=120)
-                path2 = _save_if_pdf_like(r2)
-                if path2:
-                    return path2
-                else:
-                    log.error(f"[json] KART PDF yok | key={tkey} val={tval} status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:200]}")
-            except Exception as e:
-                log.exception(f"[json] generate_kart_pdf hata key={tkey} val={tval}: {e}")
+    # 2) JSON
+    try:
+        r2 = requests.post(KART_PDF_URL, json=payload, headers=HEADERS, timeout=120)
+        path2 = _save_if_pdf_like(r2)
+        if path2:
+            return path2
+        else:
+            log.error(f"[json] KART PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:300]}")
+    except Exception as e:
+        log.exception(f"[json] generate_kart_pdf hata: {e}")
 
     return ""
 
@@ -546,7 +487,7 @@ def main():
         conversation_timeout=180,
     )
 
-    # /kart için ayrı conversation (aynen bıraktım)
+    # /kart için ayrı conversation (aynen)
     conv_kart = ConversationHandler(
         entry_points=[CommandHandler("kart", start_kart)],
         states={
