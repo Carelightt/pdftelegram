@@ -36,7 +36,7 @@ HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
 }
 
-# ✅ SADECE İZİN VERDİĞİN GRUP
+# ✅ SADECE İZİN VERDİĞİN GRUPLAR
 ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}
 
 # Konuşma durumları
@@ -96,28 +96,35 @@ def parse_pdf_inline(text: str):
 
 def parse_kart_inline(text: str):
     """
-    /kart için tek mesaj, alt alta 4 satır:
+    /kart tek mesaj (alt alta 4 satır) parser:
       /kart
       Ad Soyad
       Adres
       İl İlçe
       Tarih
-    Dönen tuple: (adsoyad, adres, ililce, tarih) veya None
+    Fazla/eksik boş satırları tolere eder.
     """
     if not text:
         return None
-    lines = [l.strip() for l in text.strip().splitlines()]
-    lines = [l for l in lines if l]
-    if not lines:
+    raw = text.strip()
+    if not raw:
         return None
-    if not lines[0].lower().startswith('/kart'):
+    # /kart veya /kart@BotAdı ile başlıyorsa
+    first_line_end = raw.find("\n")
+    first_line = raw if first_line_end == -1 else raw[:first_line_end]
+    if not first_line.lower().startswith("/kart"):
         return None
-    rest = lines[1:]
-    if len(rest) >= 4:
-        adsoyad = rest[0]
-        adres   = rest[1]
-        ililce  = rest[2]
-        tarih   = rest[3]
+
+    # Kalan satırları al, boş olanları ayıkla
+    rest_text = "" if first_line_end == -1 else raw[first_line_end+1:]
+    rest_lines = [l.strip() for l in rest_text.splitlines() if l.strip()]
+
+    # 4 ve üstü satır varsa ilk dördünü kullan (adsoyad, adres, ililce, tarih)
+    if len(rest_lines) >= 4:
+        adsoyad = rest_lines[0]
+        adres   = rest_lines[1]
+        ililce  = rest_lines[2]
+        tarih   = rest_lines[3]
         return adsoyad, adres, ililce, tarih
     return None
 
