@@ -236,31 +236,29 @@ def cmd_cancel(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # ================== KART DURUMU: /kart ==================
-KART_PDF_URL_BASE = "https://pdf-admin1.onrender.com"
+KART_PDF_URL = "https://pdf-admin1.onrender.com/kartdurum"
 
-def parse_kart_inline(text: str):
-    """
-    /kart komutunu tek mesajda çok satırlı formatta yakalar:
-        /kart
-        Ad Soyad
-        Adres
-        İl İlçe
-        Tarih
-    Başarılıysa (adsoyad, adres, ililce, tarih) döner; yoksa None.
-    """
-    if not text:
-        return None
-    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
-    if not lines or not lines[0].lower().startswith('/kart'):
-        return None
-    rest = lines[1:]
-    if len(rest) >= 4:
-        adsoyad = rest[0]
-        adres = rest[1]
-        ililce = rest[2]
-        tarih = rest[3]
-        return adsoyad, adres, ililce, tarih
-    return None
+def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
+    try:
+        data = {
+            "adsoyad": adsoyad,
+            "adres": adres,
+            "ililce": ililce,
+            "tarih": tarih
+        }
+        r = requests.post(KART_PDF_URL, data=data, headers=HEADERS, timeout=60)
+        ct = (r.headers.get("Content-Type") or "").lower()
+        if r.status_code == 200 and "pdf" in ct:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            tmp.write(r.content)
+            tmp.close()
+            return tmp.name
+        else:
+            log.error(f"KART PDF alınamadı | status={r.status_code} ct={ct} body={r.text[:200]}")
+            return ""
+    except Exception as e:
+        log.exception(f"generate_kart_pdf hata: {e}")
+        return ""
 
 def start_kart(update: Update, context: CallbackContext):
     if not _check_group(update):
