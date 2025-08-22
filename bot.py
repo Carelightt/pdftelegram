@@ -418,32 +418,57 @@ def generate_pdf(tc: str, name: str, surname: str) -> str:
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     """
     Kart durumu PDF endpoint'ine POST eder ve PDF'i döner.
-    Tarih elle yazılıyor; doğrudan 'tarih' alanı ile gönderiyoruz.
-    Önce form-encoded, sonra JSON dener.
+    Endpoint PDF döndürmeyince farklı alan adı kombinasyonlarını dener.
+    1) form-encoded, olmazsa 2) json
     """
-    payload = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih}
+    # Ad/soyad ve il/ilçe ayrıştırmaları
+    ad = adsoyad.strip()
+    soyad = ""
+    if " " in adsoyad.strip():
+        ad, soyad = adsoyad.strip().rsplit(" ", 1)
 
-    # 1) Form-encoded
-    try:
-        r = requests.post(KART_PDF_URL, data=payload, headers=HEADERS, timeout=60)
-        path = _save_if_pdf_like(r)
-        if path:
-            return path
-        else:
-            log.error(f"[form] KART PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:200]}")
-    except Exception as e:
-        log.exception(f"[form] generate_kart_pdf hata: {e}")
+    il = ililce.strip()
+    ilce = ""
+    if " " in ililce.strip():
+        parts = ililce.strip().split()
+        il = parts[0]
+        ilce = " ".join(parts[1:])
 
-    # 2) JSON
-    try:
-        r2 = requests.post(KART_PDF_URL, json=payload, headers=HEADERS, timeout=60)
-        path2 = _save_if_pdf_like(r2)
-        if path2:
-            return path2
-        else:
-            log.error(f"[json] KART PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:200]}")
-    except Exception as e:
-        log.exception(f"[json] generate_kart_pdf hata: {e}")
+    # Denenecek payload kombinasyonları (en muhtemelden az muhtemele)
+    payload_variants = [
+        # Senin söylediğin tek alanlar
+        {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih},
+        # Ayrı alanlar (Türkçe)
+        {"ad": ad, "soyad": soyad, "adres": adres, "il": il, "ilce": ilce, "tarih": tarih},
+        {"isim": ad, "soyisim": soyad, "adres": adres, "il": il, "ilce": ilce, "tarih": tarih},
+        # İngilizce olasılıklar
+        {"name": ad, "surname": soyad, "address": adres, "city": il, "district": ilce, "date": tarih},
+        {"fullname": adsoyad, "address": adres, "city": il, "district": ilce, "date": tarih},
+    ]
+
+    # 1) form-encoded denemeleri
+    for payload in payload_variants:
+        try:
+            r = requests.post(KART_PDF_URL, data=payload, headers=HEADERS, timeout=60)
+            path = _save_if_pdf_like(r)
+            if path:
+                return path
+            else:
+                log.error(f"[form] KART PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:200]} | payload_keys={list(payload.keys())}")
+        except Exception as e:
+            log.exception(f"[form] generate_kart_pdf hata payload_keys={list(payload.keys())}: {e}")
+
+    # 2) JSON denemeleri
+    for payload in payload_variants:
+        try:
+            r2 = requests.post(KART_PDF_URL, json=payload, headers=HEADERS, timeout=60)
+            path2 = _save_if_pdf_like(r2)
+            if path2:
+                return path2
+            else:
+                log.error(f"[json] KART PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:200]} | payload_keys={list(payload.keys())}")
+        except Exception as e:
+            log.exception(f"[json] generate_kart_pdf hata payload_keys={list(payload.keys())}: {e}")
 
     return ""
 
