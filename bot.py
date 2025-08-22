@@ -163,11 +163,13 @@ def start_pdf(update: Update, context: CallbackContext):
         for attempt in range(1, 4):
             try:
                 filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
-                with open(pdf_path, "rb") as f:
-                    update.message.reply_document(
-                        document=InputFile(f, filename=filename),
-                        timeout=180
-                    )
+                base = (adsoyad or context.user_data.get("k_adsoyad") or "KART").strip().replace(" ", "_").upper()
+filename = f"{base}_KART.pdf"
+with open(pdf_path, "rb") as f:
+    update.message.reply_document(
+        document=InputFile(f, filename=filename),
+        timeout=180
+    )
                 break
             except (NetworkError, TimedOut) as e:
                 log.warning(f"send_document timeout/network (attempt {attempt}): {e}")
