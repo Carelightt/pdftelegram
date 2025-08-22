@@ -531,17 +531,18 @@ def main():
     )
 
     # /kart için ayrı conversation (aynen)
-    conv_kart = ConversationHandler(
-        entry_points=[CommandHandler("kart", start_kart)],
-        states={
-            K_ADSOYAD: [MessageHandler(Filters.text & ~Filters.command, get_k_adsoyad)],
-            K_ADRES:   [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
-            K_ILILCE:  [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
-            K_TARIH:   [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
-        },
-        fallbacks=[CommandHandler("cancel", cmd_cancel)],
-        conversation_timeout=180,
-    )
+   conv_kart = ConversationHandler(
+    entry_points=[CommandHandler("kart", start_kart)],
+    states={
+        K_ADSOYAD: [MessageHandler(Filters.text & ~Filters.command, get_k_adsoyad)],
+        K_ADRES:   [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
+        K_ILILCE:  [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
+        K_TARIH:   [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
+    },
+    fallbacks=[CommandHandler("cancel", cmd_cancel)],  # ✅ buraya da eklendi
+    conversation_timeout=180,
+    allow_reentry=True   # ✅ aynı komutu tekrar yazınca sıfırlar
+)
 
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("whereami", cmd_whereami))  # teşhis komutu
