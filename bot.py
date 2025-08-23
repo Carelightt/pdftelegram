@@ -100,38 +100,36 @@ def _is_temp_allowed(chat_id: int) -> bool:
     except Exception:
         return False
 
-# ====== KARA LİSTE (ANINDA KAPATMA İÇİN) ======  ✅ YENİ
-DENY_FILE = "deny_groups.json"
-def _load_deny():
-    try:
-        with open(DENY_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return set(int(x) for x in data.get("deny", []))
-    except Exception:
-        return set()
-
-def _save_deny(deny_set: set):
-    try:
-        with open(DENY_FILE, "w", encoding="utf-8") as f:
-            json.dump({"deny": list(deny_set)}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        log.warning(f"deny_groups yazılamadı: {e}")
-
-DENY_GROUPS = _load_deny()
-
-# ====== GÜNLÜK RAPOR (GRUP BAŞI SAYAC) ======  ✅ YENİ
+# ====== GÜNLÜK RAPOR (GRUP BAŞI SAYAC) ======
 REPORT_FILE = "daily_report.json"
 TR_TZ = ZoneInfo("Europe/Istanbul")
+MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
 
 def _today_tr_str():
     return datetime.now(TR_TZ).strftime("%Y-%m-%d")
+
+def _today_tr_human():
+    now = datetime.now(TR_TZ)
+    return f"{now.day} {MONTHS_TR[now.month-1]}"
 
 def _load_report():
     try:
         with open(REPORT_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # {"date": "YYYY-MM-DD", "counts": {"-100..": N}}
+            # Eski formatı (int) da destekle: {"date": "...","counts":{"chat":"5"}}
+            # Yeni format: {"date":"...","counts":{"chat":{"pdf":N,"kart":M}}}
             if "date" in data and "counts" in data and isinstance(data["counts"], dict):
+                # migrate eski → yeni
+                migrated = False
+                for k, v in list(data["counts"].items()):
+                    if isinstance(v, int):
+                        data["counts"][k] = {"pdf": int(v), "kart": 0}
+                        migrated = True
+                    elif isinstance(v, dict):
+                        v.setdefault("pdf", 0)
+                        v.setdefault("kart", 0)
+                if migrated:
+                    _save_report(data)
                 return data
     except Exception:
         pass
@@ -153,15 +151,24 @@ def _ensure_today_report():
         _save_report(rep)
     return rep
 
-def _inc_report(chat_id: int):
+def _inc_report(chat_id: int, kind: str):
+    """kind: 'pdf' veya 'kart'"""
     rep = _ensure_today_report()
     key = str(chat_id)
-    rep["counts"][key] = int(rep["counts"].get(key, 0)) + 1
+    node = rep["counts"].get(key) or {"pdf": 0, "kart": 0}
+    if kind not in ("pdf", "kart"):
+        kind = "pdf"
+    node[kind] = int(node.get(kind, 0)) + 1
+    rep["counts"][key] = node
     _save_report(rep)
 
-def _get_today_count(chat_id: int) -> int:
+def _get_today_counts(chat_id: int):
+    """(pdf_count, kart_count, total) döner"""
     rep = _ensure_today_report()
-    return int(rep["counts"].get(str(chat_id), 0))
+    node = rep["counts"].get(str(chat_id)) or {"pdf": 0, "kart": 0}
+    pdf_c = int(node.get("pdf", 0))
+    kart_c = int(node.get("kart", 0))
+    return pdf_c, kart_c, pdf_c + kart_c
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
@@ -285,7 +292,7 @@ def cmd_whereami(update: Update, context: CallbackContext):
     uid = update.effective_user.id if update.effective_user else None
     update.message.reply_text(f"Chat ID: {cid}\nUser ID: {uid}")
 
-# ✅ Süre verme komutu (vardı)
+# ✅ Süre verme komutu — mesaj sadeleştirildi
 def cmd_yetkiver(update: Update, context: CallbackContext):
     chat = update.effective_chat
     if not chat:
@@ -314,13 +321,8 @@ def cmd_yetkiver(update: Update, context: CallbackContext):
         DENY_GROUPS.remove(chat_id)
         _save_deny(DENY_GROUPS)
 
-    # TR saatinde kullanıcıya göster
-    tr = TR_TZ
-    until_tr = until_utc.astimezone(tr)
-    update.message.reply_text(
-        f"✅ Bu grup ({chat_id}) {days} günlüğüne açıldı.\n"
-        f"⏰ Bitiş (TR): {until_tr.strftime('%Y-%m-%d %H:%M:%S')}"
-    )
+    # ✅ İstenen sade mesaj
+    update.message.reply_text(f"Bu gruba {days} günlük izin verildi.")
 
 # ✅ YENİ: Anında kapat /bitir
 def cmd_bitir(update: Update, context: CallbackContext):
@@ -342,15 +344,19 @@ def cmd_bitir(update: Update, context: CallbackContext):
 
     update.message.reply_text("⛔ Bu grubun hakkı kapatıldı.")
 
-# ✅ YENİ: Günlük rapor /rapor
+# ✅ YENİ: Günlük rapor /rapor (ayrı pdf/kart)
 def cmd_rapor(update: Update, context: CallbackContext):
     chat = update.effective_chat
     if not chat:
         return
     chat_id = chat.id
-    today = _today_tr_str()
-    count = _get_today_count(chat_id)
-    update.message.reply_text(f"📊 Bugün ({today}) bu grupta üretilen PDF sayısı: {count}")
+    human_day = _today_tr_human()
+    pdf_c, kart_c, _ = _get_today_counts(chat_id)
+    update.message.reply_text(
+        f"{human_day}\n\n"
+        f"Üretilen PDF : {pdf_c}\n"
+        f"Üretilen KART PDF : {kart_c}"
+    )
 
 def start_pdf(update: Update, context: CallbackContext):
     if not _check_group(update):
@@ -371,9 +377,9 @@ def start_pdf(update: Update, context: CallbackContext):
             update.message.reply_text("❌ PDF oluşturulamadı.")
             return ConversationHandler.END
 
-        # ✅ Rapor sayacı
+        # ✅ Rapor sayacı (/pdf)
         try:
-            _inc_report(update.effective_chat.id)
+            _inc_report(update.effective_chat.id, "pdf")
         except Exception:
             pass
 
@@ -447,9 +453,9 @@ def get_surname(update: Update, context: CallbackContext):
         update.message.reply_text("❌ PDF oluşturulamadı.")
         return ConversationHandler.END
 
-    # ✅ Rapor sayacı
+    # ✅ Rapor sayacı (/pdf)
     try:
-        _inc_report(update.effective_chat.id)
+        _inc_report(update.effective_chat.id, "pdf")
     except Exception:
         pass
 
@@ -535,9 +541,9 @@ def start_kart(update: Update, context: CallbackContext):
             update.message.reply_text("❌ Kart PDF oluşturulamadı.")
             return ConversationHandler.END
 
-        # ✅ Rapor sayacı
+        # ✅ Rapor sayacı (/kart)
         try:
-            _inc_report(update.effective_chat.id)
+            _inc_report(update.effective_chat.id, "kart")
         except Exception:
             pass
 
@@ -612,9 +618,9 @@ def get_k_tarih(update: Update, context: CallbackContext):
         update.message.reply_text("❌ Kart PDF oluşturulamadı.")
         return ConversationHandler.END
 
-    # ✅ Rapor sayacı
+    # ✅ Rapor sayacı (/kart)
     try:
-        _inc_report(update.effective_chat.id)
+        _inc_report(update.effective_chat.id, "kart")
     except Exception:
         pass
 
@@ -739,8 +745,8 @@ def main():
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("whereami", cmd_whereami))
     dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))  # vardı
-    dp.add_handler(CommandHandler("bitir", cmd_bitir))  # ✅ yeni
-    dp.add_handler(CommandHandler("rapor", cmd_rapor))  # ✅ yeni
+    dp.add_handler(CommandHandler("bitir", cmd_bitir))  # ✅
+    dp.add_handler(CommandHandler("rapor", cmd_rapor))  # ✅
     dp.add_handler(conv)
     dp.add_handler(conv_kart)
 
