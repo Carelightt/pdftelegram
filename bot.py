@@ -15,7 +15,9 @@ import tempfile
 import logging
 import requests
 from dotenv import load_dotenv
-from datetime import datetime, date
+from datetime import datetime, date, timedelta, timezone  # ✅ eklendi
+import json  # ✅ eklendi
+from zoneinfo import ZoneInfo  # ✅ eklendi
 
 from telegram import Update, InputFile
 from telegram.error import NetworkError, TimedOut
@@ -38,6 +40,65 @@ HEADERS = {
 
 # ✅ SADECE İZİN VERDİĞİN GRUPLAR
 ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}
+
+# ====== GEÇİCİ İZİN (SÜRELİ HAK) SİSTEMİ ======  ✅ EKLENDİ
+PERMS_FILE = "temp_perms.json"  # geçici izinlerin saklandığı dosya
+
+def _now_utc():
+    return datetime.now(timezone.utc)
+
+def _load_perms():
+    try:
+        with open(PERMS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return {str(k): str(v) for k, v in data.items()}
+    except Exception:
+        return {}
+
+def _save_perms(perms: dict):
+    try:
+        with open(PERMS_FILE, "w", encoding="utf-8") as f:
+            json.dump(perms, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.warning(f"temp_perms yazılamadı: {e}")
+
+def _prune_expired(perms: dict) -> dict:
+    """Süresi bitenleri ayıkla (her çağrıda tazelenir)."""
+    changed = False
+    now = _now_utc()
+    out = {}
+    for k, iso in perms.items():
+        try:
+            dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+            if dt > now:
+                out[k] = iso
+            else:
+                changed = True
+        except Exception:
+            changed = True
+    if changed:
+        _save_perms(out)
+    return out
+
+TEMP_PERMS = _prune_expired(_load_perms())
+
+def _add_temp(chat_id: int, until_dt_utc: datetime):
+    """Belirli gruba geçici hak ekle, UTC ISO olarak yaz."""
+    global TEMP_PERMS
+    TEMP_PERMS[str(chat_id)] = until_dt_utc.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    _save_perms(TEMP_PERMS)
+
+def _is_temp_allowed(chat_id: int) -> bool:
+    """Geçici hak var mı ve süresi dolmamış mı?"""
+    global TEMP_PERMS
+    TEMP_PERMS = _prune_expired(TEMP_PERMS)
+    iso = TEMP_PERMS.get(str(chat_id))
+    if not iso:
+        return False
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")) > _now_utc()
+    except Exception:
+        return False
 
 # Konuşma durumları
 TC, NAME, SURNAME = range(3)
@@ -62,13 +123,25 @@ def tr_upper(s: str) -> str:
 
 def _check_group(update: Update) -> bool:
     """İzinli grup kontrolü. Değilse uyarı ver."""
-    if update.effective_chat and (update.effective_chat.id not in ALLOWED_CHAT_ID):
-        try:
-            update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yazsın.")
-        except Exception:
-            pass
+    chat = update.effective_chat
+    if not chat:
         return False
-    return True
+    chat_id = chat.id
+
+    # Kalıcı izinliler her zamanki gibi geçer
+    if chat_id in ALLOWED_CHAT_ID:
+        return True
+
+    # ✅ Geçici izinliler
+    if _is_temp_allowed(chat_id):
+        return True
+
+    # Değilse reddet
+    try:
+        update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yazsın.")
+    except Exception:
+        pass
+    return False
 
 def parse_pdf_inline(text: str):
     """
@@ -140,6 +213,37 @@ def cmd_whereami(update: Update, context: CallbackContext):
     cid = update.effective_chat.id if update.effective_chat else None
     uid = update.effective_user.id if update.effective_user else None
     update.message.reply_text(f"Chat ID: {cid}\nUser ID: {uid}")
+
+# ✅ YENİ: /yetkiver <gün>  (1..30)  — bulunduğun gruba süreli hak verir
+def cmd_yetkiver(update: Update, context: CallbackContext):
+    chat = update.effective_chat
+    if not chat:
+        return
+    chat_id = chat.id
+
+    # argüman: "30", "30gün", "30 gün" vs → içindeki rakamları çek
+    raw = " ".join(context.args or [])
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        update.message.reply_text("Kullanım: /yetkiver <gün>  (1–30 arası)")
+        return
+
+    days = int(digits)
+    if days < 1 or days > 30:
+        update.message.reply_text("Gün 1 ile 30 arasında olmalı.")
+        return
+
+    # şimdi + days (tam saatinde bitecek)
+    until_utc = _now_utc() + timedelta(days=days)
+    _add_temp(chat_id, until_utc)
+
+    # TR saatinde kullanıcıya göster
+    tr = ZoneInfo("Europe/Istanbul")
+    until_tr = until_utc.astimezone(tr)
+    update.message.reply_text(
+        f"✅ Bu grup ({chat_id}) {days} günlüğüne açıldı.\n"
+        f"⏰ Bitiş (TR): {until_tr.strftime('%Y-%m-%d %H:%M:%S')}"
+    )
 
 def start_pdf(update: Update, context: CallbackContext):
     if not _check_group(update):
@@ -503,6 +607,7 @@ def main():
 
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("whereami", cmd_whereami))
+    dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))  # ✅ eklendi
     dp.add_handler(conv)
     dp.add_handler(conv_kart)
 
