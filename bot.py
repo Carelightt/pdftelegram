@@ -15,9 +15,9 @@ import tempfile
 import logging
 import requests
 from dotenv import load_dotenv
-from datetime import datetime, date, timedelta, timezone  # ✅ eklendi
-import json  # ✅ eklendi
-from zoneinfo import ZoneInfo  # ✅ eklendi
+from datetime import datetime, date, timedelta, timezone
+import json
+from zoneinfo import ZoneInfo
 
 from telegram import Update, InputFile
 from telegram.error import NetworkError, TimedOut
@@ -41,7 +41,7 @@ HEADERS = {
 # ✅ SADECE İZİN VERDİĞİN GRUPLAR
 ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}
 
-# ====== GEÇİCİ İZİN (SÜRELİ HAK) SİSTEMİ ======  ✅ EKLENDİ
+# ====== GEÇİCİ İZİN (SÜRELİ HAK) ======
 PERMS_FILE = "temp_perms.json"  # geçici izinlerin saklandığı dosya
 
 def _now_utc():
@@ -63,7 +63,6 @@ def _save_perms(perms: dict):
         log.warning(f"temp_perms yazılamadı: {e}")
 
 def _prune_expired(perms: dict) -> dict:
-    """Süresi bitenleri ayıkla (her çağrıda tazelenir)."""
     changed = False
     now = _now_utc()
     out = {}
@@ -83,13 +82,11 @@ def _prune_expired(perms: dict) -> dict:
 TEMP_PERMS = _prune_expired(_load_perms())
 
 def _add_temp(chat_id: int, until_dt_utc: datetime):
-    """Belirli gruba geçici hak ekle, UTC ISO olarak yaz."""
     global TEMP_PERMS
     TEMP_PERMS[str(chat_id)] = until_dt_utc.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     _save_perms(TEMP_PERMS)
 
 def _is_temp_allowed(chat_id: int) -> bool:
-    """Geçici hak var mı ve süresi dolmamış mı?"""
     global TEMP_PERMS
     TEMP_PERMS = _prune_expired(TEMP_PERMS)
     iso = TEMP_PERMS.get(str(chat_id))
@@ -100,21 +97,42 @@ def _is_temp_allowed(chat_id: int) -> bool:
     except Exception:
         return False
 
+# ====== KARA LİSTE (ANINDA KAPAT /bitir) ======
+DENY_FILE = "deny_groups.json"
+def _load_deny():
+    try:
+        with open(DENY_FILE, "r", encoding="utf-8") as f:
+            arr = json.load(f)
+            return set(int(x) for x in arr)
+    except Exception:
+        return set()
+
+def _save_deny(s: set):
+    try:
+        with open(DENY_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(s), f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.warning(f"deny_groups yazılamadı: {e}")
+
+DENY_GROUPS = _load_deny()
+
 # ====== GÜNLÜK RAPOR (GRUP BAŞI SAYAC) ======
 REPORT_FILE = "daily_report.json"
 TR_TZ = ZoneInfo("Europe/Istanbul")
+MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
 
 def _today_tr_str():
     return datetime.now(TR_TZ).strftime("%Y-%m-%d")
+
+def _today_tr_human():
+    now = datetime.now(TR_TZ)
+    return f"{now.day} {MONTHS_TR[now.month-1]}"
 
 def _load_report():
     try:
         with open(REPORT_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            # Eski formatı (int) da destekle: {"date": "...","counts":{"chat":"5"}}
-            # Yeni format: {"date":"...","counts":{"chat":{"pdf":N,"kart":M}}}
             if "date" in data and "counts" in data and isinstance(data["counts"], dict):
-                # migrate eski → yeni
                 migrated = False
                 for k, v in list(data["counts"].items()):
                     if isinstance(v, int):
@@ -141,13 +159,11 @@ def _ensure_today_report():
     rep = _load_report()
     today = _today_tr_str()
     if rep.get("date") != today:
-        # Gün değişmiş => sıfırla
         rep = {"date": today, "counts": {}}
         _save_report(rep)
     return rep
 
 def _inc_report(chat_id: int, kind: str):
-    """kind: 'pdf' veya 'kart'"""
     rep = _ensure_today_report()
     key = str(chat_id)
     node = rep["counts"].get(key) or {"pdf": 0, "kart": 0}
@@ -158,7 +174,6 @@ def _inc_report(chat_id: int, kind: str):
     _save_report(rep)
 
 def _get_today_counts(chat_id: int):
-    """(pdf_count, kart_count, total) döner"""
     rep = _ensure_today_report()
     node = rep["counts"].get(str(chat_id)) or {"pdf": 0, "kart": 0}
     pdf_c = int(node.get("pdf", 0))
@@ -179,7 +194,6 @@ log = logging.getLogger("telegrampdf")
 
 # ================== YARDIMCI ==================
 def tr_upper(s: str) -> str:
-    """Türkçe büyük harfe çevir (i→İ, ı→I fix) + kenar boşluklarını temizle."""
     if not isinstance(s, str):
         return s
     s = s.strip()
@@ -187,13 +201,12 @@ def tr_upper(s: str) -> str:
     return s.upper()
 
 def _check_group(update: Update) -> bool:
-    """İzinli grup kontrolü. Değilse uyarı ver."""
     chat = update.effective_chat
     if not chat:
         return False
     chat_id = chat.id
 
-    # ✅ Kara listedeyse direkt kapalı
+    # Kara listedeyse kapat
     if chat_id in DENY_GROUPS:
         try:
             update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yazsın.")
@@ -201,15 +214,12 @@ def _check_group(update: Update) -> bool:
             pass
         return False
 
-    # Kalıcı izinliler her zamanki gibi geçer
     if chat_id in ALLOWED_CHAT_ID:
         return True
 
-    # ✅ Geçici izinliler
     if _is_temp_allowed(chat_id):
         return True
 
-    # Değilse reddet
     try:
         update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yazsın.")
     except Exception:
@@ -217,10 +227,6 @@ def _check_group(update: Update) -> bool:
     return False
 
 def parse_pdf_inline(text: str):
-    """
-    /pdf komutunu tek mesajda yakalar (tek satır veya çok satır).
-    Başarılıysa (tc, ad, soyad) döner, yoksa None.
-    """
     if not text:
         return None
     lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
@@ -241,31 +247,17 @@ def parse_pdf_inline(text: str):
     return None
 
 def parse_kart_inline(text: str):
-    """
-    /kart tek mesaj (alt alta 4 satır) parser:
-      /kart
-      Ad Soyad
-      Adres
-      İl İlçe
-      Tarih
-    Fazla/eksik boş satırları tolere eder.
-    """
     if not text:
         return None
     raw = text.strip()
     if not raw:
         return None
-    # /kart veya /kart@BotAdı ile başlıyorsa
     first_line_end = raw.find("\n")
     first_line = raw if first_line_end == -1 else raw[:first_line_end]
     if not first_line.lower().startswith("/kart"):
         return None
-
-    # Kalan satırları al, boş olanları ayıkla
     rest_text = "" if first_line_end == -1 else raw[first_line_end+1:]
     rest_lines = [l.strip() for l in rest_text.splitlines() if l.strip()]
-
-    # 4 ve üstü satır varsa ilk dördünü kullan (adsoyad, adres, ililce, tarih)
     if len(rest_lines) >= 4:
         adsoyad = rest_lines[0]
         adres   = rest_lines[1]
@@ -282,100 +274,84 @@ def cmd_start(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 def cmd_whereami(update: Update, context: CallbackContext):
-    """Bulunduğun chat ve kullanıcı ID'sini gösterir (teşhis için)."""
     cid = update.effective_chat.id if update.effective_chat else None
     uid = update.effective_user.id if update.effective_user else None
     update.message.reply_text(f"Chat ID: {cid}\nUser ID: {uid}")
 
-# ✅ Süre verme komutu (vardı)
+# Süre verme komutu — sade mesaj
 def cmd_yetkiver(update: Update, context: CallbackContext):
     chat = update.effective_chat
     if not chat:
         return
     chat_id = chat.id
-
-    # argüman: "30", "30gün", "30 gün" vs → içindeki rakamları çek
     raw = " ".join(context.args or [])
     digits = "".join(ch for ch in raw if ch.isdigit())
     if not digits:
         update.message.reply_text("Kullanım: /yetkiver <gün>  (1–30 arası)")
         return
-
     days = int(digits)
     if days < 1 or days > 30:
         update.message.reply_text("Gün 1 ile 30 arasında olmalı.")
         return
-
-    # şimdi + days (tam saatinde bitecek)
     until_utc = _now_utc() + timedelta(days=days)
     _add_temp(chat_id, until_utc)
 
-    # Kara listedeyse kaldır (yeniden açılmış sayılır)
+    # bitir ile kapatılmışsa kaldır
     global DENY_GROUPS
     if chat_id in DENY_GROUPS:
         DENY_GROUPS.remove(chat_id)
         _save_deny(DENY_GROUPS)
 
-    # TR saatinde kullanıcıya göster
-    tr = TR_TZ
-    until_tr = until_utc.astimezone(tr)
-    update.message.reply_text(
-        f"✅ Bu grup ({chat_id}) {days} günlüğüne açıldı.\n"
-        f"⏰ Bitiş (TR): {until_tr.strftime('%Y-%m-%d %H:%M:%S')}"
-    )
+    update.message.reply_text(f"Bu gruba {days} günlük izin verildi.")
 
-# ✅ YENİ: Anında kapat /bitir
+# Anında kapat
 def cmd_bitir(update: Update, context: CallbackContext):
     chat = update.effective_chat
     if not chat:
         return
     chat_id = chat.id
 
-    # Geçici izni kaldır
     global TEMP_PERMS
     if str(chat_id) in TEMP_PERMS:
         del TEMP_PERMS[str(chat_id)]
         _save_perms(TEMP_PERMS)
 
-    # Kara listeye ekle (kalıcı izinli olsa bile baskın kapatır)
     global DENY_GROUPS
     DENY_GROUPS.add(chat_id)
     _save_deny(DENY_GROUPS)
 
     update.message.reply_text("⛔ Bu grubun hakkı kapatıldı.")
 
-# ✅ YENİ: Günlük rapor /rapor
+# Günlük rapor
 def cmd_rapor(update: Update, context: CallbackContext):
     chat = update.effective_chat
     if not chat:
         return
     chat_id = chat.id
-    today = _today_tr_str()
-    count = _get_today_count(chat_id)
-    update.message.reply_text(f"📊 Bugün ({today}) bu grupta üretilen PDF sayısı: {count}")
+    human_day = _today_tr_human()
+    pdf_c, kart_c, _ = _get_today_counts(chat_id)
+    update.message.reply_text(
+        f"{human_day}\n\n"
+        f"Üretilen PDF : {pdf_c}\n"
+        f"Üretilen KART PDF : {kart_c}"
+    )
 
 def start_pdf(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
-
-    # 🔥 Tek mesajdan direkt PDF üretim denemesi
     inline = parse_pdf_inline(update.message.text or "")
     if inline:
         tc_raw, name_raw, surname_raw = inline
         update.message.reply_text("⏳ PDF hazırlanıyor")
-
         name_up = tr_upper(name_raw)
         surname_up = tr_upper(surname_raw)
-
         pdf_path = generate_pdf(tc_raw.strip(), name_up, surname_up)
-
         if not pdf_path:
             update.message.reply_text("❌ PDF oluşturulamadı.")
             return ConversationHandler.END
 
-        # ✅ Rapor sayacı
         try:
-            _inc_report(update.effective_chat.id)
+            _inc_report(update.effective_chat.id, "pdf")
         except Exception:
             pass
 
@@ -412,7 +388,6 @@ def start_pdf(update: Update, context: CallbackContext):
 
         return ConversationHandler.END
 
-    # ❓ Eski davranış: adım adım sor
     update.message.reply_text("Müşterinin TC numarasını yaz:")
     return TC
 
@@ -435,23 +410,15 @@ def get_surname(update: Update, context: CallbackContext):
         return ConversationHandler.END
     context.user_data["surname"] = update.message.text
     update.message.reply_text("⏳ PDF hazırlanıyor")
-
     name_up = tr_upper(context.user_data["name"])
     surname_up = tr_upper(context.user_data["surname"])
-
-    pdf_path = generate_pdf(
-        context.user_data["tc"],
-        name_up,
-        surname_up
-    )
-
+    pdf_path = generate_pdf(context.user_data["tc"], name_up, surname_up)
     if not pdf_path:
         update.message.reply_text("❌ PDF oluşturulamadı.")
         return ConversationHandler.END
 
-    # ✅ Rapor sayacı
     try:
-        _inc_report(update.effective_chat.id)
+        _inc_report(update.effective_chat.id, "pdf")
     except Exception:
         pass
 
@@ -498,16 +465,8 @@ def cmd_cancel(update: Update, context: CallbackContext):
 KART_PDF_URL = "https://pdf-admin1.onrender.com/generate2"
 
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
-    """
-    /generate2'ye post atar. Backend sabit koordinatları zaten kullanıyor.
-    """
     try:
-        data = {
-            "adsoyad": adsoyad,
-            "adres": adres,
-            "ililce": ililce,
-            "tarih": tarih,
-        }
+        data = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih}
         r = requests.post(KART_PDF_URL, data=data, headers=HEADERS, timeout=90)
         ct = (r.headers.get("Content-Type") or "").lower()
         if r.status_code == 200 and "pdf" in ct:
@@ -525,27 +484,22 @@ def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
 def start_kart(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
-
-    # 🔥 Tek mesaj alt alta 4 satır formatını dene
     inline = parse_kart_inline(update.message.text or "")
     if inline:
         adsoyad, adres, ililce, tarih = inline
         update.message.reply_text("⏳ Kart durumu PDF hazırlanıyor...")
         pdf_path = generate_kart_pdf(adsoyad, adres, ililce, tarih)
-
         if not pdf_path:
             update.message.reply_text("❌ Kart PDF oluşturulamadı.")
             return ConversationHandler.END
 
-        # ✅ Rapor sayacı
         try:
-            _inc_report(update.effective_chat.id)
+            _inc_report(update.effective_chat.id, "kart")
         except Exception:
             pass
 
         for attempt in range(1, 4):
             try:
-                # AD_SOYAD_KART.pdf olarak gönder
                 base = (adsoyad or "KART").strip().replace(" ", "_").upper()
                 filename = f"{base}_KART.pdf"
                 with open(pdf_path, "rb") as f:
@@ -572,7 +526,6 @@ def start_kart(update: Update, context: CallbackContext):
 
         return ConversationHandler.END
 
-    # Inline değilse eski akış
     update.message.reply_text("Ad Soyad yaz:")
     return K_ADSOYAD
 
@@ -602,21 +555,18 @@ def get_k_tarih(update: Update, context: CallbackContext):
         return ConversationHandler.END
     context.user_data["k_tarih"] = update.message.text.strip()
     update.message.reply_text("⏳ Kart durumu PDF hazırlanıyor...")
-
     pdf_path = generate_kart_pdf(
         context.user_data["k_adsoyad"],
         context.user_data["k_adres"],
         context.user_data["k_ililce"],
         context.user_data["k_tarih"]
     )
-
     if not pdf_path:
         update.message.reply_text("❌ Kart PDF oluşturulamadı.")
         return ConversationHandler.END
 
-    # ✅ Rapor sayacı
     try:
-        _inc_report(update.effective_chat.id)
+        _inc_report(update.effective_chat.id, "kart")
     except Exception:
         pass
 
@@ -650,7 +600,6 @@ def get_k_tarih(update: Update, context: CallbackContext):
 
 # ================== PDF OLUŞTURMA ==================
 def _save_if_pdf_like(resp) -> str:
-    """Yanıt PDF ise dosyaya kaydedip yolunu döner; aksi halde '' döner."""
     try:
         ct = (resp.headers.get("Content-Type") or "").lower()
         cd = (resp.headers.get("Content-Disposition") or "").lower()
@@ -740,9 +689,9 @@ def main():
 
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("whereami", cmd_whereami))
-    dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))  # vardı
-    dp.add_handler(CommandHandler("bitir", cmd_bitir))  # ✅ yeni
-    dp.add_handler(CommandHandler("rapor", cmd_rapor))  # ✅ yeni
+    dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))
+    dp.add_handler(CommandHandler("bitir", cmd_bitir))
+    dp.add_handler(CommandHandler("rapor", cmd_rapor))
     dp.add_handler(conv)
     dp.add_handler(conv_kart)
 
