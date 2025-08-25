@@ -181,7 +181,7 @@ def _get_today_counts(chat_id: int):
     return pdf_c, kart_c, pdf_c + kart_c
 
 # Konuşma durumları
-TC, NAME, SURNAME = range(3)
+TC, NAME, SURNAME, MIKTAR = range(4)
 # /kart için durumlar
 K_ADSOYAD, K_ADRES, K_ILILCE, K_TARIH = range(4)
 
@@ -227,6 +227,14 @@ def _check_group(update: Update) -> bool:
     return False
 
 def parse_pdf_inline(text: str):
+    """
+    /pdf komutu için inline parse:
+    Çok satırlı:
+      /pdf\\nTC\\nAD\\nSOYAD\\nMIKTAR
+    Tek satır (opsiyonel):
+      /pdf TC AD SOYAD ... MIKTAR
+    Dönüş: (tc, ad, soyad, miktar) ya da None
+    """
     if not text:
         return None
     lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
@@ -235,15 +243,26 @@ def parse_pdf_inline(text: str):
     first = lines[0]
     if not first.lower().startswith('/pdf'):
         return None
-    parts = first.split()
-    if len(parts) >= 4:
-        return parts[1], parts[2], " ".join(parts[3:])
+
+    # Çok satırlı tercih
     rest = lines[1:]
-    if len(rest) >= 3:
+    if len(rest) >= 4:
         tc = rest[0]
         ad = rest[1]
-        soyad = " ".join(rest[2:])
-        return tc, ad, soyad
+        soyad = rest[2]
+        miktar = rest[3]
+        return tc, ad, soyad, miktar
+
+    # Tek satır varyantı
+    parts = first.split()
+    # /pdf TC AD (SOYAD BİRKAÇ KELİME) MIKTAR  -> en sondaki token'ı miktar say
+    if len(parts) >= 5:
+        tc = parts[1]
+        ad = parts[2]
+        miktar = parts[-1]
+        soyad = " ".join(parts[3:-1])
+        return tc, ad, soyad, miktar
+
     return None
 
 def parse_kart_inline(text: str):
@@ -341,11 +360,11 @@ def start_pdf(update: Update, context: CallbackContext):
         return ConversationHandler.END
     inline = parse_pdf_inline(update.message.text or "")
     if inline:
-        tc_raw, name_raw, surname_raw = inline
+        tc_raw, name_raw, surname_raw, miktar_raw = inline
         update.message.reply_text("⏳ PDF hazırlanıyor")
         name_up = tr_upper(name_raw)
         surname_up = tr_upper(surname_raw)
-        pdf_path = generate_pdf(tc_raw.strip(), name_up, surname_up)
+        pdf_path = generate_pdf(tc_raw.strip(), name_up, surname_up, miktar_raw.strip())
         if not pdf_path:
             update.message.reply_text("❌ PDF oluşturulamadı.")
             return ConversationHandler.END
@@ -409,10 +428,22 @@ def get_surname(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
     context.user_data["surname"] = update.message.text
+    update.message.reply_text("Miktarı yaz (örn: 5.000):")
+    return MIKTAR
+
+def get_miktar(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["miktar"] = update.message.text.strip()
     update.message.reply_text("⏳ PDF hazırlanıyor")
     name_up = tr_upper(context.user_data["name"])
     surname_up = tr_upper(context.user_data["surname"])
-    pdf_path = generate_pdf(context.user_data["tc"], name_up, surname_up)
+    pdf_path = generate_pdf(
+        context.user_data["tc"],
+        name_up,
+        surname_up,
+        context.user_data["miktar"]
+    )
     if not pdf_path:
         update.message.reply_text("❌ PDF oluşturulamadı.")
         return ConversationHandler.END
@@ -615,8 +646,8 @@ def _save_if_pdf_like(resp) -> str:
         log.exception(f"_save_if_pdf_like hata: {e}")
         return ""
 
-def generate_pdf(tc: str, name: str, surname: str) -> str:
-    data = {"tc": tc, "ad": name, "soyad": surname}
+def generate_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
+    data = {"tc": tc, "ad": name, "soyad": surname, "miktar": miktar}
     try:
         r = requests.post(PDF_URL, data=data, headers=HEADERS, timeout=120)
         path = _save_if_pdf_like(r)
@@ -668,6 +699,7 @@ def main():
             TC: [MessageHandler(Filters.text & ~Filters.command, get_tc)],
             NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
             SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_surname)],
+            MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_miktar)],
         },
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
         conversation_timeout=180,
