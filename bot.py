@@ -29,16 +29,23 @@ from telegram.ext import (
 # ================== AYAR ==================
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-BOT_KEY = os.getenv("BOT_KEY", "")  # <<< EKLENDİ
+BOT_KEY   = os.getenv("BOT_KEY")  # 🔑 siteyle aynı olmalı
 
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
-HEADERS = {
+KART_PDF_URL = "https://pdf-admin1.onrender.com/generate2"
+
+HEADERS_BASE = {
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/pdf,application/octet-stream,*/*",
     "Referer": "https://pdf-admin1.onrender.com/",
     "X-Requested-With": "XMLHttpRequest",
-    "X-Bot-Key": BOT_KEY,  # <<< EKLENDİ
 }
+def _headers():
+    """Her istekte X-Bot-Key ekle (varsa)."""
+    h = dict(HEADERS_BASE)
+    if BOT_KEY:
+        h["X-Bot-Key"] = BOT_KEY
+    return h
 
 # ✅ SADECE İZİN VERDİĞİN GRUPLAR
 ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}
@@ -232,7 +239,7 @@ def parse_pdf_inline(text: str):
     """
     /pdf komutu için inline parse:
     Çok satırlı:
-      /pdf\nTC\nAD\nSOYAD\nMIKTAR
+      /pdf\\nTC\\nAD\\nSOYAD\\nMIKTAR
     Tek satır (opsiyonel):
       /pdf TC AD SOYAD ... MIKTAR
     Dönüş: (tc, ad, soyad, miktar) ya da None
@@ -495,12 +502,10 @@ def cmd_cancel(update: Update, context: CallbackContext):
     return ConversationHandler.END
 
 # ================== KART DURUMU: /kart ==================
-KART_PDF_URL = "https://pdf-admin1.onrender.com/generate2"
-
 def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     try:
         data = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih}
-        r = requests.post(KART_PDF_URL, data=data, headers=HEADERS, timeout=90)
+        r = requests.post(KART_PDF_URL, data=data, headers=_headers(), timeout=90)
         ct = (r.headers.get("Content-Type") or "").lower()
         if r.status_code == 200 and "pdf" in ct:
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
@@ -651,7 +656,7 @@ def _save_if_pdf_like(resp) -> str:
 def generate_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
     data = {"tc": tc, "ad": name, "soyad": surname, "miktar": miktar}
     try:
-        r = requests.post(PDF_URL, data=data, headers=HEADERS, timeout=120)
+        r = requests.post(PDF_URL, data=data, headers=_headers(), timeout=120)
         path = _save_if_pdf_like(r)
         if path:
             return path
@@ -660,7 +665,7 @@ def generate_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
     except Exception as e:
         log.exception(f"[form] generate_pdf hata: {e}")
     try:
-        r2 = requests.post(PDF_URL, json=data, headers=HEADERS, timeout=120)
+        r2 = requests.post(PDF_URL, json=data, headers=_headers(), timeout=120)
         path2 = _save_if_pdf_like(r2)
         if path2:
             return path2
