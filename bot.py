@@ -29,6 +29,7 @@ from telegram.ext import (
 # ================== AYAR ==================
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_KEY = os.getenv("BOT_KEY", "")  # <<< EKLENDİ
 
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 HEADERS = {
@@ -36,6 +37,7 @@ HEADERS = {
     "Accept": "application/pdf,application/octet-stream,*/*",
     "Referer": "https://pdf-admin1.onrender.com/",
     "X-Requested-With": "XMLHttpRequest",
+    "X-Bot-Key": BOT_KEY,  # <<< EKLENDİ
 }
 
 # ✅ SADECE İZİN VERDİĞİN GRUPLAR
@@ -230,7 +232,7 @@ def parse_pdf_inline(text: str):
     """
     /pdf komutu için inline parse:
     Çok satırlı:
-      /pdf\\nTC\\nAD\\nSOYAD\\nMIKTAR
+      /pdf\nTC\nAD\nSOYAD\nMIKTAR
     Tek satır (opsiyonel):
       /pdf TC AD SOYAD ... MIKTAR
     Dönüş: (tc, ad, soyad, miktar) ya da None
