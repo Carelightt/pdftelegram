@@ -31,8 +31,8 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_KEY   = os.getenv("BOT_KEY")  # 🔑 siteyle aynı olmalı
 
-PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
-KART_PDF_URL = "https://pdf-admin1.onrender.com/generate2"
+PDF_URL = "https://cngztypdfwbst.onrender.com/generate"  # Ücret formu endpoint'i
+KART_PDF_URL = "https://cngztypdfwbst.onrender.com/generate2"
 
 HEADERS_BASE = {
     "User-Agent": "Mozilla/5.0",
