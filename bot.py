@@ -218,7 +218,7 @@ def _check_group(update: Update) -> bool:
     # Kara listedeyse kapat
     if chat_id in DENY_GROUPS:
         try:
-            update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yazsın.")
+            update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yaz.")
         except Exception:
             pass
         return False
@@ -230,7 +230,7 @@ def _check_group(update: Update) -> bool:
         return True
 
     try:
-        update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yazsın.")
+        update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yaz.")
     except Exception:
         pass
     return False
