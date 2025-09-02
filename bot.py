@@ -48,7 +48,7 @@ def _headers():
     return h
 
 # ✅ SADECE İZİN VERDİĞİN GRUPLAR
-ALLOWED_CHAT_ID = {-1002950346446, -1002955588715, -4959830304}
+ALLOWED_CHAT_ID = -1002955588715
 
 # ====== GEÇİCİ İZİN (SÜRELİ HAK) ======
 PERMS_FILE = "temp_perms.json"  # geçici izinlerin saklandığı dosya
