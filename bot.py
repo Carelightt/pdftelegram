@@ -31,8 +31,9 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_KEY   = os.getenv("BOT_KEY")  # 🔑 siteyle aynı olmalı
 
-PDF_URL = "https://cngztypdfwbst.onrender.com/generate"  # Ücret formu endpoint'i
-KART_PDF_URL = "https://cngztypdfwbst.onrender.com/generate2"
+PDF_URL       = "https://cngztypdfwbst.onrender.com/generate"   # Ücret formu endpoint'i
+KART_PDF_URL  = "https://cngztypdfwbst.onrender.com/generate2"
+BURS_PDF_URL  = "https://cngztypdfwbst.onrender.com/generate3"  # ✅ Burs endpoint'i (sablon3.pdf)
 
 HEADERS_BASE = {
     "User-Agent": "Mozilla/5.0",
@@ -193,6 +194,8 @@ def _get_today_counts(chat_id: int):
 TC, NAME, SURNAME, MIKTAR = range(4)
 # /kart için durumlar
 K_ADSOYAD, K_ADRES, K_ILILCE, K_TARIH = range(4)
+# /burs için durumlar (ayrı ConversationHandler, çakışma sorun olmaz)
+B_TC, B_NAME, B_SURNAME, B_MIKTAR = range(4)
 
 # ================== LOG ==================
 logging.basicConfig(
@@ -239,7 +242,7 @@ def parse_pdf_inline(text: str):
     """
     /pdf komutu için inline parse:
     Çok satırlı:
-      /pdf\\nTC\\nAD\\nSOYAD\\nMIKTAR
+      /pdf\nTC\nAD\nSOYAD\nMIKTAR
     Tek satır (opsiyonel):
       /pdf TC AD SOYAD ... MIKTAR
     Dönüş: (tc, ad, soyad, miktar) ya da None
@@ -294,11 +297,45 @@ def parse_kart_inline(text: str):
         return adsoyad, adres, ililce, tarih
     return None
 
+def parse_burs_inline(text: str):
+    """
+    /burs komutu için inline parse:
+      /burs\nTC\nAD\nSOYAD\nMIKTAR
+    veya tek satır:
+      /burs TC AD SOYAD ... MIKTAR
+    """
+    if not text:
+        return None
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+    if not lines:
+        return None
+    first = lines[0]
+    if not first.lower().startswith('/burs'):
+        return None
+
+    rest = lines[1:]
+    if len(rest) >= 4:
+        tc = rest[0]
+        ad = rest[1]
+        soyad = rest[2]
+        miktar = rest[3]
+        return tc, ad, soyad, miktar
+
+    parts = first.split()
+    if len(parts) >= 5:
+        tc = parts[1]
+        ad = parts[2]
+        miktar = parts[-1]
+        soyad = " ".join(parts[3:-1])
+        return tc, ad, soyad, miktar
+
+    return None
+
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
-    update.message.reply_text("Başlamak için /pdf veya /kart yaz.")
+    update.message.reply_text("Başlamak için /pdf, /kart veya /burs yaz.")
     return ConversationHandler.END
 
 def cmd_whereami(update: Update, context: CallbackContext):
@@ -364,6 +401,7 @@ def cmd_rapor(update: Update, context: CallbackContext):
         f"Üretilen KART PDF : {kart_c}"
     )
 
+# ================== /pdf ==================
 def start_pdf(update: Update, context: CallbackContext):
     if not _check_group(update):
         return ConversationHandler.END
@@ -517,7 +555,7 @@ def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
             return ""
     except Exception as e:
         log.exception(f"generate_kart_pdf hata: {e}")
-        return ""
+    return ""
 
 def start_kart(update: Update, context: CallbackContext):
     if not _check_group(update):
@@ -636,6 +674,150 @@ def get_k_tarih(update: Update, context: CallbackContext):
 
     return ConversationHandler.END
 
+# ================== BURS: /burs ==================
+def generate_burs_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
+    """sablon3.pdf üzerinden burs çıktısı üretir (/generate3)"""
+    data = {"tc": tc, "ad": name, "soyad": surname, "miktar": miktar}
+    try:
+        r = requests.post(BURS_PDF_URL, data=data, headers=_headers(), timeout=120)
+        path = _save_if_pdf_like(r)
+        if path:
+            return path
+        else:
+            log.error(f"[burs form] PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
+    except Exception as e:
+        log.exception(f"[burs form] generate_burs_pdf hata: {e}")
+    # JSON fallback (gerek duyulursa)
+    try:
+        r2 = requests.post(BURS_PDF_URL, json=data, headers=_headers(), timeout=120)
+        path2 = _save_if_pdf_like(r2)
+        if path2:
+            return path2
+        else:
+            log.error(f"[burs json] PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:300]}")
+    except Exception as e:
+        log.exception(f"[burs json] generate_burs_pdf hata: {e}")
+    return ""
+
+def start_burs(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    inline = parse_burs_inline(update.message.text or "")
+    if inline:
+        tc_raw, name_raw, surname_raw, miktar_raw = inline
+        update.message.reply_text("⏳ BURS PDF hazırlanıyor")
+        name_up = tr_upper(name_raw)
+        surname_up = tr_upper(surname_raw)
+        pdf_path = generate_burs_pdf(tc_raw.strip(), name_up, surname_up, miktar_raw.strip())
+        if not pdf_path:
+            update.message.reply_text("❌ BURS PDF oluşturulamadı.")
+            return ConversationHandler.END
+
+        try:
+            _inc_report(update.effective_chat.id, "pdf")  # burs'u pdf sayıyoruz
+        except Exception:
+            pass
+
+        for attempt in range(1, 4):
+            try:
+                filename = f"{name_up}_{surname_up}_BURS.pdf".replace(" ", "_")
+                with open(pdf_path, "rb") as f:
+                    update.message.reply_document(
+                        document=InputFile(f, filename=filename),
+                        timeout=180
+                    )
+                break
+            except (NetworkError, TimedOut) as e:
+                log.warning(f"burs send timeout/network (attempt {attempt}): {e}")
+                if attempt == 3:
+                    update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
+                else:
+                    time.sleep(2 * attempt)
+            except Exception as e:
+                log.exception(f"burs send failed: {e}")
+                update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
+                break
+
+        try:
+            os.remove(pdf_path)
+        except Exception:
+            pass
+
+        return ConversationHandler.END
+
+    update.message.reply_text("TC yaz:")
+    return B_TC
+
+def get_b_tc(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["b_tc"] = update.message.text.strip()
+    update.message.reply_text("Ad yaz:")
+    return B_NAME
+
+def get_b_name(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["b_name"] = update.message.text
+    update.message.reply_text("Soyad yaz:")
+    return B_SURNAME
+
+def get_b_surname(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["b_surname"] = update.message.text
+    update.message.reply_text("Miktar yaz (örn: 5.000):")
+    return B_MIKTAR
+
+def get_b_miktar(update: Update, context: CallbackContext):
+    if not _check_group(update):
+        return ConversationHandler.END
+    context.user_data["b_miktar"] = update.message.text.strip()
+    update.message.reply_text("⏳ BURS PDF hazırlanıyor")
+    name_up = tr_upper(context.user_data["b_name"])
+    surname_up = tr_upper(context.user_data["b_surname"])
+    pdf_path = generate_burs_pdf(
+        context.user_data["b_tc"],
+        name_up,
+        surname_up,
+        context.user_data["b_miktar"]
+    )
+    if not pdf_path:
+        update.message.reply_text("❌ BURS PDF oluşturulamadı.")
+        return ConversationHandler.END
+
+    try:
+        _inc_report(update.effective_chat.id, "pdf")
+    except Exception:
+        pass
+
+    for attempt in range(1, 4):
+        try:
+            filename = f"{name_up}_{surname_up}_BURS.pdf".replace(" ", "_")
+            with open(pdf_path, "rb") as f:
+                update.message.reply_document(
+                    document=InputFile(f, filename=filename),
+                    timeout=180
+                )
+            break
+        except (NetworkError, TimedOut) as e:
+            log.warning(f"burs send timeout/network (attempt {attempt}): {e}")
+            if attempt == 3:
+                update.message.reply_text("⚠️ Yükleme zaman aşımına uğradı. Tekrar dene.")
+            else:
+                time.sleep(2 * attempt)
+        except Exception as e:
+            log.exception(f"burs send failed: {e}")
+            update.message.reply_text("❌ Dosya gönderirken hata oluştu.")
+            break
+
+    try:
+        os.remove(pdf_path)
+    except Exception:
+        pass
+
+    return ConversationHandler.END
+
 # ================== PDF OLUŞTURMA ==================
 def _save_if_pdf_like(resp) -> str:
     try:
@@ -726,6 +908,20 @@ def main():
         allow_reentry=True
     )
 
+    # ✅ /burs handler
+    conv_burs = ConversationHandler(
+        entry_points=[CommandHandler("burs", start_burs)],
+        states={
+            B_TC:      [MessageHandler(Filters.text & ~Filters.command, get_b_tc)],
+            B_NAME:    [MessageHandler(Filters.text & ~Filters.command, get_b_name)],
+            B_SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_b_surname)],
+            B_MIKTAR:  [MessageHandler(Filters.text & ~Filters.command, get_b_miktar)],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        conversation_timeout=180,
+        allow_reentry=True
+    )
+
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("whereami", cmd_whereami))
     dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))
@@ -733,6 +929,7 @@ def main():
     dp.add_handler(CommandHandler("rapor", cmd_rapor))
     dp.add_handler(conv)
     dp.add_handler(conv_kart)
+    dp.add_handler(conv_burs)  # 👈 eklendi
 
     log.info("Bot açılıyor...")
     updater.start_polling(drop_pending_updates=True)
