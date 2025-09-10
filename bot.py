@@ -126,6 +126,52 @@ def _save_deny(s: set):
 
 DENY_GROUPS = _load_deny()
 
+# ====== HAK (ADET) SİSTEMİ ======
+QUOTA_FILE = "quota_rights.json"
+
+def _load_quota():
+    try:
+        with open(QUOTA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            # {chat_id_str: int}
+            out = {}
+            for k, v in data.items():
+                try:
+                    out[str(int(k))] = int(v)
+                except Exception:
+                    pass
+            return out
+    except Exception:
+        return {}
+
+def _save_quota(d: dict):
+    try:
+        with open(QUOTA_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.warning(f"quota yazılamadı: {e}")
+
+QUOTA = _load_quota()
+
+def _get_quota(chat_id: int) -> int:
+    return int(QUOTA.get(str(chat_id), 0))
+
+def _set_quota(chat_id: int, amount: int):
+    global QUOTA
+    QUOTA[str(chat_id)] = max(0, int(amount))
+    _save_quota(QUOTA)
+
+def _dec_quota_if_applicable(chat_id: int):
+    """
+    Sadece ALLOWED veya TEMP izni YOKSA düş.
+    (Süre izni varsa sınırsız, hak azaltılmaz.)
+    """
+    if chat_id in ALLOWED_CHAT_ID or _is_temp_allowed(chat_id):
+        return
+    rem = _get_quota(chat_id)
+    if rem > 0:
+        _set_quota(chat_id, rem - 1)
+
 # ====== GÜNLÜK RAPOR (GRUP BAŞI SAYAC) ======
 REPORT_FILE = "daily_report.json"
 TR_TZ = ZoneInfo("Europe/Istanbul")
@@ -194,7 +240,7 @@ def _get_today_counts(chat_id: int):
 TC, NAME, SURNAME, MIKTAR = range(4)
 # /kart için durumlar
 K_ADSOYAD, K_ADRES, K_ILILCE, K_TARIH = range(4)
-# /burs için durumlar (ayrı ConversationHandler, çakışma sorun olmaz)
+# /burs için durumlar
 B_TC, B_NAME, B_SURNAME, B_MIKTAR = range(4)
 
 # ================== LOG ==================
@@ -212,6 +258,9 @@ def tr_upper(s: str) -> str:
     s = s.replace("i", "İ").replace("ı", "I")
     return s.upper()
 
+def _has_time_or_whitelist(chat_id: int) -> bool:
+    return (chat_id in ALLOWED_CHAT_ID) or _is_temp_allowed(chat_id)
+
 def _check_group(update: Update) -> bool:
     chat = update.effective_chat
     if not chat:
@@ -226,14 +275,17 @@ def _check_group(update: Update) -> bool:
             pass
         return False
 
-    if chat_id in ALLOWED_CHAT_ID:
+    # Süre/whitelist ise serbest
+    if _has_time_or_whitelist(chat_id):
         return True
 
-    if _is_temp_allowed(chat_id):
+    # Değilse hak (adet) kontrolü
+    if _get_quota(chat_id) > 0:
         return True
 
+    # Hiçbiri yoksa kapalı
     try:
-        update.message.reply_text("Hakkın kapalıdır. Destek için @CengizzAtay yaz.")
+        update.message.reply_text("Bu grubun hakkı yoktur. /yetkiver veya /hakver kullanın.")
     except Exception:
         pass
     return False
@@ -242,7 +294,7 @@ def parse_pdf_inline(text: str):
     """
     /pdf komutu için inline parse:
     Çok satırlı:
-      /pdf\nTC\nAD\nSOYAD\nMIKTAR
+      /pdf\\nTC\\nAD\\nSOYAD\\nMIKTAR
     Tek satır (opsiyonel):
       /pdf TC AD SOYAD ... MIKTAR
     Dönüş: (tc, ad, soyad, miktar) ya da None
@@ -267,7 +319,6 @@ def parse_pdf_inline(text: str):
 
     # Tek satır varyantı
     parts = first.split()
-    # /pdf TC AD (SOYAD BİRKAÇ KELİME) MIKTAR  -> en sondaki token'ı miktar say
     if len(parts) >= 5:
         tc = parts[1]
         ad = parts[2]
@@ -300,7 +351,7 @@ def parse_kart_inline(text: str):
 def parse_burs_inline(text: str):
     """
     /burs komutu için inline parse:
-      /burs\nTC\nAD\nSOYAD\nMIKTAR
+      /burs\\nTC\\nAD\\nSOYAD\\nMIKTAR
     veya tek satır:
       /burs TC AD SOYAD ... MIKTAR
     """
@@ -369,6 +420,42 @@ def cmd_yetkiver(update: Update, context: CallbackContext):
 
     update.message.reply_text(f"Bu gruba {days} günlük izin verildi.")
 
+# Hak verme (adet)
+def cmd_hakver(update: Update, context: CallbackContext):
+    chat = update.effective_chat
+    if not chat:
+        return
+    chat_id = chat.id
+    raw = " ".join(context.args or [])
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        update.message.reply_text("Kullanım: /hakver <adet>  (örn: /hakver 20)")
+        return
+    amount = int(digits)
+    if amount < 0:
+        update.message.reply_text("Adet 0 veya üstü olmalı.")
+        return
+    _set_quota(chat_id, amount)
+
+    # Eğer kara listedeyse aç (hak tanındıysa mantıken kullanabilsin)
+    global DENY_GROUPS
+    if chat_id in DENY_GROUPS:
+        DENY_GROUPS.remove(chat_id)
+        _save_deny(DENY_GROUPS)
+
+    update.message.reply_text(f"✅ Bu gruba {amount} adet PDF hakkı tanımlandı.")
+
+def cmd_hakdurum(update: Update, context: CallbackContext):
+    chat = update.effective_chat
+    if not chat:
+        return
+    chat_id = chat.id
+    rem = _get_quota(chat_id)
+    msg = f"Kalan hak: {rem}"
+    if _has_time_or_whitelist(chat_id):
+        msg += "\n(Not: Süreli/whitelist izni olduğu için hak düşmez.)"
+    update.message.reply_text(msg)
+
 # Anında kapat
 def cmd_bitir(update: Update, context: CallbackContext):
     chat = update.effective_chat
@@ -421,12 +508,7 @@ def start_pdf(update: Update, context: CallbackContext):
         except Exception:
             pass
 
-        try:
-            size_mb = os.path.getsize(pdf_path) / 1024 / 1024
-            log.info(f"PDF size: {size_mb:.2f} MB")
-        except Exception:
-            pass
-
+        sent_ok = False
         for attempt in range(1, 4):
             try:
                 filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
@@ -435,6 +517,7 @@ def start_pdf(update: Update, context: CallbackContext):
                         document=InputFile(f, filename=filename),
                         timeout=180
                     )
+                sent_ok = True
                 break
             except (NetworkError, TimedOut) as e:
                 log.warning(f"send_document timeout/network (attempt {attempt}): {e}")
@@ -451,6 +534,9 @@ def start_pdf(update: Update, context: CallbackContext):
             os.remove(pdf_path)
         except Exception:
             pass
+
+        if sent_ok:
+            _dec_quota_if_applicable(update.effective_chat.id)
 
         return ConversationHandler.END
 
@@ -500,12 +586,7 @@ def get_miktar(update: Update, context: CallbackContext):
     except Exception:
         pass
 
-    try:
-        size_mb = os.path.getsize(pdf_path) / 1024 / 1024
-        log.info(f"PDF size: {size_mb:.2f} MB")
-    except Exception:
-        pass
-
+    sent_ok = False
     for attempt in range(1, 4):
         try:
             filename = f"{name_up}_{surname_up}.pdf".replace(" ", "_")
@@ -514,6 +595,7 @@ def get_miktar(update: Update, context: CallbackContext):
                     document=InputFile(f, filename=filename),
                     timeout=180
                 )
+            sent_ok = True
             break
         except (NetworkError, TimedOut) as e:
             log.warning(f"send_document timeout/network (attempt {attempt}): {e}")
@@ -530,6 +612,9 @@ def get_miktar(update: Update, context: CallbackContext):
         os.remove(pdf_path)
     except Exception:
         pass
+
+    if sent_ok:
+        _dec_quota_if_applicable(update.effective_chat.id)
 
     return ConversationHandler.END
 
@@ -574,6 +659,7 @@ def start_kart(update: Update, context: CallbackContext):
         except Exception:
             pass
 
+        sent_ok = False
         for attempt in range(1, 4):
             try:
                 base = (adsoyad or "KART").strip().replace(" ", "_").upper()
@@ -583,6 +669,7 @@ def start_kart(update: Update, context: CallbackContext):
                         document=InputFile(f, filename=filename),
                         timeout=180
                     )
+                sent_ok = True
                 break
             except (NetworkError, TimedOut) as e:
                 log.warning(f"kart send timeout/network (attempt {attempt}): {e}")
@@ -599,6 +686,9 @@ def start_kart(update: Update, context: CallbackContext):
             os.remove(pdf_path)
         except Exception:
             pass
+
+        if sent_ok:
+            _dec_quota_if_applicable(update.effective_chat.id)
 
         return ConversationHandler.END
 
@@ -646,6 +736,7 @@ def get_k_tarih(update: Update, context: CallbackContext):
     except Exception:
         pass
 
+    sent_ok = False
     for attempt in range(1, 4):
         try:
             base = (context.user_data.get("k_adsoyad") or "KART").strip().replace(" ", "_").upper()
@@ -655,6 +746,7 @@ def get_k_tarih(update: Update, context: CallbackContext):
                     document=InputFile(f, filename=filename),
                     timeout=180
                 )
+            sent_ok = True
             break
         except (NetworkError, TimedOut) as e:
             log.warning(f"kart send timeout/network (attempt {attempt}): {e}")
@@ -672,6 +764,9 @@ def get_k_tarih(update: Update, context: CallbackContext):
     except Exception:
         pass
 
+    if sent_ok:
+        _dec_quota_if_applicable(update.effective_chat.id)
+
     return ConversationHandler.END
 
 # ================== BURS: /burs ==================
@@ -687,7 +782,6 @@ def generate_burs_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
             log.error(f"[burs form] PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
     except Exception as e:
         log.exception(f"[burs form] generate_burs_pdf hata: {e}")
-    # JSON fallback (gerek duyulursa)
     try:
         r2 = requests.post(BURS_PDF_URL, json=data, headers=_headers(), timeout=120)
         path2 = _save_if_pdf_like(r2)
@@ -718,6 +812,7 @@ def start_burs(update: Update, context: CallbackContext):
         except Exception:
             pass
 
+        sent_ok = False
         for attempt in range(1, 4):
             try:
                 filename = f"{name_up}_{surname_up}_BURS.pdf".replace(" ", "_")
@@ -726,6 +821,7 @@ def start_burs(update: Update, context: CallbackContext):
                         document=InputFile(f, filename=filename),
                         timeout=180
                     )
+                sent_ok = True
                 break
             except (NetworkError, TimedOut) as e:
                 log.warning(f"burs send timeout/network (attempt {attempt}): {e}")
@@ -742,6 +838,9 @@ def start_burs(update: Update, context: CallbackContext):
             os.remove(pdf_path)
         except Exception:
             pass
+
+        if sent_ok:
+            _dec_quota_if_applicable(update.effective_chat.id)
 
         return ConversationHandler.END
 
@@ -791,6 +890,7 @@ def get_b_miktar(update: Update, context: CallbackContext):
     except Exception:
         pass
 
+    sent_ok = False
     for attempt in range(1, 4):
         try:
             filename = f"{name_up}_{surname_up}_BURS.pdf".replace(" ", "_")
@@ -799,6 +899,7 @@ def get_b_miktar(update: Update, context: CallbackContext):
                     document=InputFile(f, filename=filename),
                     timeout=180
                 )
+            sent_ok = True
             break
         except (NetworkError, TimedOut) as e:
             log.warning(f"burs send timeout/network (attempt {attempt}): {e}")
@@ -815,6 +916,9 @@ def get_b_miktar(update: Update, context: CallbackContext):
         os.remove(pdf_path)
     except Exception:
         pass
+
+    if sent_ok:
+        _dec_quota_if_applicable(update.effective_chat.id)
 
     return ConversationHandler.END
 
@@ -925,11 +1029,13 @@ def main():
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("whereami", cmd_whereami))
     dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))
+    dp.add_handler(CommandHandler("hakver", cmd_hakver))      # 👈 yeni
+    dp.add_handler(CommandHandler("kalanhak", cmd_hakdurum))  # 👈 yeni
     dp.add_handler(CommandHandler("bitir", cmd_bitir))
     dp.add_handler(CommandHandler("rapor", cmd_rapor))
     dp.add_handler(conv)
     dp.add_handler(conv_kart)
-    dp.add_handler(conv_burs)  # 👈 eklendi
+    dp.add_handler(conv_burs)
 
     log.info("Bot açılıyor...")
     updater.start_polling(drop_pending_updates=True)
