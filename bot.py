@@ -51,6 +51,23 @@ def _headers():
 # ✅ SADECE İZİN VERDİĞİN GRUPLAR
 ALLOWED_CHAT_ID = {-1002955588714}
 
+# ====== ADMIN KİLİDİ ======
+ADMIN_ID = 6672759317  # 👈 sadece bu kullanıcı admin
+
+def _is_admin(update: Update) -> bool:
+    u = update.effective_user
+    return bool(u and u.id == ADMIN_ID)
+
+def _require_admin(update: Update) -> bool:
+    """Admin değilse kullanıcıyı uyarır, False döner."""
+    if not _is_admin(update):
+        try:
+            update.message.reply_text("⛔ Bu komutu kullanma yetkin yok.")
+        except Exception:
+            pass
+        return False
+    return True
+
 # ====== GEÇİCİ İZİN (SÜRELİ HAK) ======
 PERMS_FILE = "temp_perms.json"  # geçici izinlerin saklandığı dosya
 
@@ -384,18 +401,23 @@ def parse_burs_inline(text: str):
 
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _require_admin(update):
         return ConversationHandler.END
-    update.message.reply_text("Başlamak için /pdf, /kart veya /burs yaz.")
+    # admin için bilgi mesajı (normal /start artık kilitli)
+    update.message.reply_text("Admin panel komutları: /yetkiver, /hakver, /kalanhak, /bitir, /rapor")
     return ConversationHandler.END
 
 def cmd_whereami(update: Update, context: CallbackContext):
+    if not _require_admin(update):
+        return
     cid = update.effective_chat.id if update.effective_chat else None
     uid = update.effective_user.id if update.effective_user else None
     update.message.reply_text(f"Chat ID: {cid}\nUser ID: {uid}")
 
-# Süre verme komutu — sade mesaj
+# Süre verme komutu — SADECE ADMIN
 def cmd_yetkiver(update: Update, context: CallbackContext):
+    if not _require_admin(update):
+        return
     chat = update.effective_chat
     if not chat:
         return
@@ -420,8 +442,10 @@ def cmd_yetkiver(update: Update, context: CallbackContext):
 
     update.message.reply_text(f"Bu gruba {days} günlük izin verildi.")
 
-# Hak verme (adet)
+# Hak verme (adet) — SADECE ADMIN
 def cmd_hakver(update: Update, context: CallbackContext):
+    if not _require_admin(update):
+        return
     chat = update.effective_chat
     if not chat:
         return
@@ -437,7 +461,7 @@ def cmd_hakver(update: Update, context: CallbackContext):
         return
     _set_quota(chat_id, amount)
 
-    # Eğer kara listedeyse aç (hak tanındıysa mantıken kullanabilsin)
+    # Eğer kara listedeyse aç (hak tanındıysa kullanabilsin)
     global DENY_GROUPS
     if chat_id in DENY_GROUPS:
         DENY_GROUPS.remove(chat_id)
@@ -445,7 +469,10 @@ def cmd_hakver(update: Update, context: CallbackContext):
 
     update.message.reply_text(f"✅ Bu gruba {amount} adet PDF hakkı tanımlandı.")
 
+# Kalan hak — SADECE ADMIN
 def cmd_hakdurum(update: Update, context: CallbackContext):
+    if not _require_admin(update):
+        return
     chat = update.effective_chat
     if not chat:
         return
@@ -456,8 +483,10 @@ def cmd_hakdurum(update: Update, context: CallbackContext):
         msg += "\n(Not: Süreli/whitelist izni olduğu için hak düşmez.)"
     update.message.reply_text(msg)
 
-# Anında kapat
+# Anında kapat — SADECE ADMIN
 def cmd_bitir(update: Update, context: CallbackContext):
+    if not _require_admin(update):
+        return
     chat = update.effective_chat
     if not chat:
         return
@@ -474,8 +503,10 @@ def cmd_bitir(update: Update, context: CallbackContext):
 
     update.message.reply_text("⛔ Bu grubun hakkı kapatıldı.")
 
-# Günlük rapor
+# Günlük rapor — SADECE ADMIN
 def cmd_rapor(update: Update, context: CallbackContext):
+    if not _require_admin(update):
+        return
     chat = update.effective_chat
     if not chat:
         return
@@ -1026,6 +1057,7 @@ def main():
         allow_reentry=True
     )
 
+    # Admin-only komutlar
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("whereami", cmd_whereami))
     dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))
@@ -1033,6 +1065,8 @@ def main():
     dp.add_handler(CommandHandler("kalanhak", cmd_hakdurum))  # 👈 yeni
     dp.add_handler(CommandHandler("bitir", cmd_bitir))
     dp.add_handler(CommandHandler("rapor", cmd_rapor))
+
+    # Normal akışlar
     dp.add_handler(conv)
     dp.add_handler(conv_kart)
     dp.add_handler(conv_burs)
