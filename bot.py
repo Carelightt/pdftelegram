@@ -62,7 +62,7 @@ def _require_admin(update: Update) -> bool:
     """Admin değilse kullanıcıyı uyarır, False döner."""
     if not _is_admin(update):
         try:
-            update.message.reply_text("⛔ Bu komutu kullanma yetkin yok.")
+            update.message.reply_text("⛔ Bu komutu kullanma yetkin yok.@CengizzAtay")
         except Exception:
             pass
         return False
