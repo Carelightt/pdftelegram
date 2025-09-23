@@ -17,7 +17,9 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime, date, timedelta, timezone
 import json
-from zoneinfo import ZoneInfo
+import pytz   # 👈 burayı ekle
+
+TR_TZ = pytz.timezone("Europe/Istanbul")  # 👈 zoneinfo yerine pytz kullanıyoruz
 
 from telegram import Update, InputFile
 from telegram.error import NetworkError, TimedOut
