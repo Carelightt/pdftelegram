@@ -26,6 +26,10 @@ from telegram.ext import (
     ConversationHandler, CallbackContext
 )
 
+# ⏰ Scheduler
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
 # ================== AYAR ==================
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -191,6 +195,7 @@ def _dec_quota_if_applicable(chat_id: int):
 
 # ====== GÜNLÜK RAPOR (GRUP BAŞI SAYAC) ======
 REPORT_FILE = "daily_report.json"
+TITLES_FILE = "group_titles.json"   # 👈 grup adlarını saklarız
 TR_TZ = ZoneInfo("Europe/Istanbul")
 MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
 
@@ -200,6 +205,23 @@ def _today_tr_str():
 def _today_tr_human():
     now = datetime.now(TR_TZ)
     return f"{now.day} {MONTHS_TR[now.month-1]}"
+
+def _load_titles():
+    try:
+        with open(TITLES_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+            return {str(k): str(v) for k, v in d.items()}
+    except Exception:
+        return {}
+
+def _save_titles(d: dict):
+    try:
+        with open(TITLES_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.warning(f"group_titles yazılamadı: {e}")
+
+GROUP_TITLES = _load_titles()
 
 def _load_report():
     try:
@@ -236,7 +258,8 @@ def _ensure_today_report():
         _save_report(rep)
     return rep
 
-def _inc_report(chat_id: int, kind: str):
+def _inc_report(chat_id: int, kind: str, title: str = None):
+    """Günlük sayaç artır. (title verilirse kaydederiz.)"""
     rep = _ensure_today_report()
     key = str(chat_id)
     node = rep["counts"].get(key) or {"pdf": 0, "kart": 0}
@@ -245,6 +268,10 @@ def _inc_report(chat_id: int, kind: str):
     node[kind] = int(node.get(kind, 0)) + 1
     rep["counts"][key] = node
     _save_report(rep)
+
+    if title:
+        GROUP_TITLES[key] = title
+        _save_titles(GROUP_TITLES)
 
 def _get_today_counts(chat_id: int):
     rep = _ensure_today_report()
@@ -311,7 +338,7 @@ def parse_pdf_inline(text: str):
     """
     /pdf komutu için inline parse:
     Çok satırlı:
-      /pdf\\nTC\\nAD\\nSOYAD\\nMIKTAR
+      /pdf\nTC\nAD\nSOYAD\nMIKTAR
     Tek satır (opsiyonel):
       /pdf TC AD SOYAD ... MIKTAR
     Dönüş: (tc, ad, soyad, miktar) ya da None
@@ -368,7 +395,7 @@ def parse_kart_inline(text: str):
 def parse_burs_inline(text: str):
     """
     /burs komutu için inline parse:
-      /burs\\nTC\\nAD\\nSOYAD\\nMIKTAR
+      /burs\nTC\nAD\nSOYAD\nMIKTAR
     veya tek satır:
       /burs TC AD SOYAD ... MIKTAR
     """
@@ -503,7 +530,7 @@ def cmd_bitir(update: Update, context: CallbackContext):
 
     update.message.reply_text("⛔ Bu grubun hakkı kapatıldı.")
 
-# Günlük rapor — SADECE ADMIN
+# Günlük rapor — SADECE ADMIN (o anki grup için)
 def cmd_rapor(update: Update, context: CallbackContext):
     if not _require_admin(update):
         return
@@ -535,7 +562,7 @@ def start_pdf(update: Update, context: CallbackContext):
             return ConversationHandler.END
 
         try:
-            _inc_report(update.effective_chat.id, "pdf")
+            _inc_report(update.effective_chat.id, "pdf", getattr(update.effective_chat, "title", None))
         except Exception:
             pass
 
@@ -613,7 +640,7 @@ def get_miktar(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     try:
-        _inc_report(update.effective_chat.id, "pdf")
+        _inc_report(update.effective_chat.id, "pdf", getattr(update.effective_chat, "title", None))
     except Exception:
         pass
 
@@ -686,7 +713,7 @@ def start_kart(update: Update, context: CallbackContext):
             return ConversationHandler.END
 
         try:
-            _inc_report(update.effective_chat.id, "kart")
+            _inc_report(update.effective_chat.id, "kart", getattr(update.effective_chat, "title", None))
         except Exception:
             pass
 
@@ -763,7 +790,7 @@ def get_k_tarih(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     try:
-        _inc_report(update.effective_chat.id, "kart")
+        _inc_report(update.effective_chat.id, "kart", getattr(update.effective_chat, "title", None))
     except Exception:
         pass
 
@@ -839,7 +866,8 @@ def start_burs(update: Update, context: CallbackContext):
             return ConversationHandler.END
 
         try:
-            _inc_report(update.effective_chat.id, "pdf")  # burs'u pdf sayıyoruz
+            # burs'u pdf sayıyorduk, aynı şekilde yazıyoruz ama başlık da kaydediyoruz
+            _inc_report(update.effective_chat.id, "pdf", getattr(update.effective_chat, "title", None))
         except Exception:
             pass
 
@@ -917,7 +945,7 @@ def get_b_miktar(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     try:
-        _inc_report(update.effective_chat.id, "pdf")
+        _inc_report(update.effective_chat.id, "pdf", getattr(update.effective_chat, "title", None))
     except Exception:
         pass
 
@@ -952,6 +980,53 @@ def get_b_miktar(update: Update, context: CallbackContext):
         _dec_quota_if_applicable(update.effective_chat.id)
 
     return ConversationHandler.END
+
+# ================== GÜNLÜK DM RAPORU ==================
+def _build_daily_message(bot: "telegram.Bot") -> str:
+    rep = _ensure_today_report()
+    counts = rep.get("counts", {})
+    if not counts:
+        return (
+            "ÜRETİLEN TOPLAM PDF  : 0\n"
+            "ÜRETİLEN BURS ve PDF : 0\n"
+            "ÜRETİLEN KART PDF : 0\n\n"
+            "Bugün üretim yok."
+        )
+
+    total_pdf = 0
+    total_kart = 0
+    lines = []
+    for chat_id_str, node in counts.items():
+        pdf_c = int(node.get("pdf", 0))
+        kart_c = int(node.get("kart", 0))
+        total_pdf += pdf_c
+        total_kart += kart_c
+
+        title = GROUP_TITLES.get(chat_id_str)
+        if not title:
+            # son çare: chat başlığını çekmeye çalış (fail olursa ID yaz)
+            try:
+                ch = bot.get_chat(int(chat_id_str))
+                title = getattr(ch, "title", None) or f"Grup {chat_id_str}"
+            except Exception:
+                title = f"Grup {chat_id_str}"
+
+        lines.append(f"- {title} ({chat_id_str}) → PDF: {pdf_c} | KART: {kart_c}")
+
+    msg = (
+        f"ÜRETİLEN TOPLAM PDF  : {total_pdf}\n"
+        f"ÜRETİLEN BURS ve PDF : {total_pdf}\n"
+        f"ÜRETİLEN KART PDF : {total_kart}\n\n"
+        + "\n".join(lines)
+    )
+    return msg
+
+def send_daily_dm(bot: "telegram.Bot"):
+    try:
+        text = _build_daily_message(bot)
+        bot.send_message(chat_id=ADMIN_ID, text=text)
+    except Exception as e:
+        log.exception(f"Günlük DM raporu gönderilemedi: {e}")
 
 # ================== PDF OLUŞTURMA ==================
 def _save_if_pdf_like(resp) -> str:
@@ -1070,6 +1145,17 @@ def main():
     dp.add_handler(conv)
     dp.add_handler(conv_kart)
     dp.add_handler(conv_burs)
+
+    # ⏰ Günlük 23:55'te ADMIN_ID'ye DM rapor
+    scheduler = BackgroundScheduler(timezone=TR_TZ)
+    scheduler.add_job(
+        send_daily_dm,
+        CronTrigger(hour=23, minute=55, timezone=TR_TZ),
+        args=[updater.bot],
+        id="daily_dm_2355",
+        replace_existing=True,
+    )
+    scheduler.start()
 
     log.info("Bot açılıyor...")
     updater.start_polling(drop_pending_updates=True)
