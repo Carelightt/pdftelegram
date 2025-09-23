@@ -17,7 +17,7 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime, date, timedelta, timezone
 import json
-import pytz   # ✅ zoneinfo yerine bunu kullan
+import pytz   # ✅ zoneinfo yerine pytz kullanıyoruz
 
 TR_TZ = pytz.timezone("Europe/Istanbul")  # ✅ ZoneInfo yerine pytz
 
