@@ -198,7 +198,8 @@ def _dec_quota_if_applicable(chat_id: int):
 # ====== GÜNLÜK RAPOR (GRUP BAŞI SAYAC) ======
 REPORT_FILE = "daily_report.json"
 TITLES_FILE = "group_titles.json"   # 👈 grup adlarını saklarız
-TR_TZ = ZoneInfo("Europe/Istanbul")
+import pytz
+TR_TZ = pytz.timezone("Europe/Istanbul")   # ✅ ZoneInfo yerine pytz
 MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
 
 def _today_tr_str():
