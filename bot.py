@@ -549,6 +549,24 @@ def cmd_rapor(update: Update, context: CallbackContext):
         f"Üretilen KART PDF : {kart_c}"
     )
 
+# ✅ TÜM GÜNÜN GENEL RAPORU — SADECE ADMIN
+def cmd_raporadmin(update: Update, context: CallbackContext):
+    if not _require_admin(update):
+        return
+    # özelden yazılmasını tavsiye et
+    try:
+        if update.effective_chat and getattr(update.effective_chat, "type", "") != "private":
+            update.message.reply_text("Bu komutu bana özelden yaz: /raporadmin")
+            return
+    except Exception:
+        pass
+    try:
+        text = _build_daily_message(context.bot)
+        update.message.reply_text(text)
+    except Exception as e:
+        log.exception(f"/raporadmin hata: {e}")
+        update.message.reply_text("Rapor hazırlanırken bir sorun oluştu.")
+
 # ================== /pdf ==================
 def start_pdf(update: Update, context: CallbackContext):
     if not _check_group(update):
@@ -1143,6 +1161,7 @@ def main():
     dp.add_handler(CommandHandler("kalanhak", cmd_hakdurum))  # 👈 yeni
     dp.add_handler(CommandHandler("bitir", cmd_bitir))
     dp.add_handler(CommandHandler("rapor", cmd_rapor))
+    dp.add_handler(CommandHandler("raporadmin", cmd_raporadmin))  # 👈 eklendi
 
     # Normal akışlar
     dp.add_handler(conv)
