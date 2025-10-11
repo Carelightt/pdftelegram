@@ -857,28 +857,28 @@ def start_kart(update: Update, context: CallbackContext):
     return K_ADSOYAD
 
 def get_k_adsoyad(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ Düzeltildi
         return ConversationHandler.END
     context.user_data["k_adsoyad"] = update.message.text.strip()
     update.message.reply_text("Adres yaz:")
     return K_ADRES
 
 def get_k_adres(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ Düzeltildi
         return ConversationHandler.END
     context.user_data["k_adres"] = update.message.text.strip()
     update.message.reply_text("İl İlçe yaz:")
     return K_ILILCE
 
 def get_k_ililce(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ Düzeltildi
         return ConversationHandler.END
     context.user_data["k_ililce"] = update.message.text.strip()
     update.message.reply_text("Tarih yaz:")
     return K_TARIH
 
 def get_k_tarih(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ Düzeltildi
         return ConversationHandler.END
     context.user_data["k_tarih"] = update.message.text.strip()
     update.message.reply_text("⏳ Kart durumu PDF hazırlanıyor...")
@@ -955,7 +955,7 @@ def generate_burs_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
     return ""
 
 def start_burs(update: Update, context: CallbackContext):
-    if not _check_group(update, context):  # ✅ context eklendi
+    if not _check_group(update, context):  # ✅ Düzeltildi (Zaten düzeltilmişti, kontrol amaçlı bıraktım)
         return ConversationHandler.END
     inline = parse_burs_inline(update.message.text or "")
     if inline:
@@ -1010,28 +1010,28 @@ def start_burs(update: Update, context: CallbackContext):
     return B_TC
 
 def get_b_tc(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ Düzeltildi
         return ConversationHandler.END
     context.user_data["b_tc"] = update.message.text.strip()
     update.message.reply_text("Ad yaz:")
     return B_NAME
 
 def get_b_name(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ Düzeltildi
         return ConversationHandler.END
     context.user_data["b_name"] = update.message.text
     update.message.reply_text("Soyad yaz:")
     return B_SURNAME
 
 def get_b_surname(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ Düzeltildi
         return ConversationHandler.END
     context.user_data["b_surname"] = update.message.text
     update.message.reply_text("Miktar yaz (örn: 5.000):")
     return B_MIKTAR
 
 def get_b_miktar(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ Düzeltildi
         return ConversationHandler.END
     context.user_data["b_miktar"] = update.message.text.strip()
     update.message.reply_text("⏳ BURS PDF hazırlanıyor")
