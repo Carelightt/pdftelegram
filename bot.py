@@ -197,7 +197,7 @@ def _dec_quota_if_applicable(chat_id: int):
 
 # ====== KONTENJAN (ÜYE SAYISI) SİSTEMİ ======
 LIMIT_FILE = "group_limits.json"      # 👈 grup limitlerini saklarız
-DEFAULT_LIMIT = 7                     # 👈 Varsayılan maksimum üye sayısı (SİZİN İSTEĞİNİZ: 7)
+DEFAULT_LIMIT = 5                     # 👈 Varsayılan maksimum üye sayısı (SİZİN İSTEĞİNİZ: 7)
 
 def _load_limits():
     """Grup ID'si başına özel limiti yükler."""
@@ -804,7 +804,7 @@ def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     return ""
 
 def start_kart(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context):  # ✅ context eklendi
         return ConversationHandler.END
     inline = parse_kart_inline(update.message.text or "")
     if inline:
@@ -955,7 +955,7 @@ def generate_burs_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
     return ""
 
 def start_burs(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context):  # ✅ context eklendi
         return ConversationHandler.END
     inline = parse_burs_inline(update.message.text or "")
     if inline:
