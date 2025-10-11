@@ -17,7 +17,7 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime, date, timedelta, timezone
 import json
-import pytz   # ✅ zoneinfo yerine pytz kullanıyoruz
+import pytz    # ✅ zoneinfo yerine pytz kullanıyoruz
 
 TR_TZ = pytz.timezone("Europe/Istanbul")  # ✅ ZoneInfo yerine pytz
 
@@ -37,7 +37,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_KEY   = os.getenv("BOT_KEY")  # 🔑 siteyle aynı olmalı
 
-PDF_URL       = "https://pdf-admin1.onrender.com/generate"   # Ücret formu endpoint'i
+PDF_URL       = "https://pdf-admin1.onrender.com/generate"    # Ücret formu endpoint'i
 KART_PDF_URL  = "https://pdf-admin1.onrender.com/generate2"
 BURS_PDF_URL  = "https://pdf-admin1.onrender.com/generate3"  # ✅ Burs endpoint'i (sablon3.pdf)
 
@@ -197,9 +197,9 @@ def _dec_quota_if_applicable(chat_id: int):
 
 # ====== GÜNLÜK RAPOR (GRUP BAŞI SAYAC) ======
 REPORT_FILE = "daily_report.json"
-TITLES_FILE = "group_titles.json"   # 👈 grup adlarını saklarız
+TITLES_FILE = "group_titles.json"    # 👈 grup adlarını saklarız
 import pytz
-TR_TZ = pytz.timezone("Europe/Istanbul")   # ✅ ZoneInfo yerine pytz
+TR_TZ = pytz.timezone("Europe/Istanbul")    # ✅ ZoneInfo yerine pytz
 MONTHS_TR = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"]
 
 def _today_tr_str():
@@ -234,11 +234,12 @@ def _load_report():
                 migrated = False
                 for k, v in list(data["counts"].items()):
                     if isinstance(v, int):
-                        data["counts"][k] = {"pdf": int(v), "kart": 0}
+                        data["counts"][k] = {"pdf": int(v), "kart": 0, "burs": 0} # Burs eklendi
                         migrated = True
                     elif isinstance(v, dict):
                         v.setdefault("pdf", 0)
                         v.setdefault("kart", 0)
+                        v.setdefault("burs", 0) # Burs eklendi
                 if migrated:
                     _save_report(data)
                 return data
@@ -265,8 +266,8 @@ def _inc_report(chat_id: int, kind: str, title: str = None):
     """Günlük sayaç artır. (title verilirse kaydederiz.)"""
     rep = _ensure_today_report()
     key = str(chat_id)
-    node = rep["counts"].get(key) or {"pdf": 0, "kart": 0}
-    if kind not in ("pdf", "kart"):
+    node = rep["counts"].get(key) or {"pdf": 0, "kart": 0, "burs": 0} # burs eklendi
+    if kind not in ("pdf", "kart", "burs"): # burs eklendi
         kind = "pdf"
     node[kind] = int(node.get(kind, 0)) + 1
     rep["counts"][key] = node
@@ -278,17 +279,18 @@ def _inc_report(chat_id: int, kind: str, title: str = None):
 
 def _get_today_counts(chat_id: int):
     rep = _ensure_today_report()
-    node = rep["counts"].get(str(chat_id)) or {"pdf": 0, "kart": 0}
-    pdf_c = int(node.get("pdf", 0))
+    node = rep["counts"].get(str(chat_id)) or {"pdf": 0, "kart": 0, "burs": 0} # burs eklendi
+    pdf_c = int(node.get("pdf", 0)) + int(node.get("burs", 0)) # Burs pdf'e dahil
     kart_c = int(node.get("kart", 0))
     return pdf_c, kart_c, pdf_c + kart_c
 
 # Konuşma durumları
+# /pdf durumları
 TC, NAME, SURNAME, MIKTAR = range(4)
 # /kart için durumlar
-K_ADSOYAD, K_ADRES, K_ILILCE, K_TARIH = range(4)
+K_ADSOYAD, K_ADRES, K_ILILCE, K_TARIH = range(4, 4 + 4) # 4, 5, 6, 7 (7 istenen hata no)
 # /burs için durumlar
-B_TC, B_NAME, B_SURNAME, B_MIKTAR = range(4)
+B_TC, B_NAME, B_SURNAME, B_MIKTAR = range(8, 8 + 4) # 8, 9, 10, 11
 
 # ================== LOG ==================
 logging.basicConfig(
@@ -429,12 +431,39 @@ def parse_burs_inline(text: str):
 
     return None
 
+# ====== PDF ÜRETİMİ (ORTAK FONKSİYONLAR) ======
+
+def _save_if_pdf_like(response: requests.Response) -> str:
+    """HTTP yanıtını kontrol eder ve PDF ise geçici dosyaya kaydeder."""
+    ct = (response.headers.get("Content-Type") or "").lower()
+    if response.status_code == 200 and ("pdf" in ct or "octet-stream" in ct) and len(response.content) > 1024:
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        tmp.write(response.content)
+        tmp.close()
+        return tmp.name
+    return ""
+
+def generate_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
+    """sablon1.pdf üzerinden ücret formu çıktısı üretir (/generate)"""
+    data = {"tc": tc, "ad": name, "soyad": surname, "miktar": miktar}
+    try:
+        r = requests.post(PDF_URL, data=data, headers=_headers(), timeout=120)
+        path = _save_if_pdf_like(r)
+        if path:
+            return path
+        else:
+            log.error(f"[ücret form] PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
+    except Exception as e:
+        log.exception(f"[ücret form] generate_pdf hata: {e}")
+    return ""
+
+
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
     if not _require_admin(update):
         return ConversationHandler.END
     # admin için bilgi mesajı (normal /start artık kilitli)
-    update.message.reply_text("Admin panel komutları: /yetkiver, /hakver, /kalanhak, /bitir, /rapor")
+    update.message.reply_text("Admin panel komutları: /yetkiver, /hakver, /kalanhak, /bitir, /rapor, /raporadmin")
     return ConversationHandler.END
 
 def cmd_whereami(update: Update, context: CallbackContext):
@@ -549,6 +578,56 @@ def cmd_rapor(update: Update, context: CallbackContext):
         f"Üretilen KART PDF : {kart_c}"
     )
 
+def _build_daily_message(bot) -> str:
+    """Günlük rapor mesajını hazırlar."""
+    rep = _ensure_today_report()
+    counts = rep["counts"]
+    human_day = _today_tr_human()
+
+    if not counts:
+        return f"Bugün ({human_day}) henüz bir işlem yapılmadı."
+
+    total_pdf = 0
+    total_kart = 0
+    group_lines = []
+
+    sorted_keys = sorted(counts.keys(), key=lambda k: int(counts[k].get("pdf", 0)) + int(counts[k].get("kart", 0)), reverse=True)
+
+    for chat_id_str in sorted_keys:
+        chat_id = int(chat_id_str)
+        node = counts[chat_id_str]
+        pdf_c = node.get("pdf", 0) + node.get("burs", 0) # Burs dahil
+        kart_c = node.get("kart", 0)
+        
+        # chat.get_chat ile güncel adı almaya çalış
+        title = GROUP_TITLES.get(chat_id_str, f"Grup ID: {chat_id_str}")
+        
+        # Grup başlığını güncelle (sadece admin özelden yazıyorsa)
+        if chat_id < 0: # Grup ise
+            try:
+                chat_info = bot.get_chat(chat_id)
+                current_title = getattr(chat_info, "title", None)
+                if current_title and GROUP_TITLES.get(chat_id_str) != current_title:
+                    GROUP_TITLES[chat_id_str] = current_title
+                    title = current_title
+                    _save_titles(GROUP_TITLES)
+            except Exception:
+                pass # Ulaşılamayan grup olabilir
+
+        group_lines.append(f"• {title}: PDF={pdf_c}, KART={kart_c}")
+        
+        total_pdf += pdf_c
+        total_kart += kart_c
+
+    report_text = f"🗓️ **Günlük Rapor: {human_day}**\n\n"
+    report_text += f"**Toplam Üretim**:\n"
+    report_text += f"  - Ücret / Burs PDF: **{total_pdf}**\n"
+    report_text += f"  - Kart PDF: **{total_kart}**\n\n"
+    report_text += "**Detaylar (En çoktan aza)**:\n"
+    report_text += "\n".join(group_lines)
+
+    return report_text
+
 # ✅ TÜM GÜNÜN GENEL RAPORU — SADECE ADMIN
 def cmd_raporadmin(update: Update, context: CallbackContext):
     if not _require_admin(update):
@@ -562,7 +641,7 @@ def cmd_raporadmin(update: Update, context: CallbackContext):
         pass
     try:
         text = _build_daily_message(context.bot)
-        update.message.reply_text(text)
+        update.message.reply_text(text, parse_mode='Markdown')
     except Exception as e:
         log.exception(f"/raporadmin hata: {e}")
         update.message.reply_text("Rapor hazırlanırken bir sorun oluştu.")
@@ -708,14 +787,11 @@ def generate_kart_pdf(adsoyad: str, adres: str, ililce: str, tarih: str) -> str:
     try:
         data = {"adsoyad": adsoyad, "adres": adres, "ililce": ililce, "tarih": tarih}
         r = requests.post(KART_PDF_URL, data=data, headers=_headers(), timeout=90)
-        ct = (r.headers.get("Content-Type") or "").lower()
-        if r.status_code == 200 and "pdf" in ct:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-            tmp.write(r.content)
-            tmp.close()
-            return tmp.name
+        path = _save_if_pdf_like(r)
+        if path:
+            return path
         else:
-            log.error(f"KART PDF alınamadı | status={r.status_code} ct={ct} body={r.text[:200]}")
+            log.error(f"[KART form] PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:200]}")
             return ""
     except Exception as e:
         log.exception(f"generate_kart_pdf hata: {e}")
@@ -966,7 +1042,7 @@ def get_b_miktar(update: Update, context: CallbackContext):
         return ConversationHandler.END
 
     try:
-        _inc_report(update.effective_chat.id, "pdf", getattr(update.effective_chat, "title", None))
+        _inc_report(update.effective_chat.id, "burs", getattr(update.effective_chat, "title", None))
     except Exception:
         pass
 
@@ -1002,185 +1078,105 @@ def get_b_miktar(update: Update, context: CallbackContext):
 
     return ConversationHandler.END
 
-# ================== GÜNLÜK DM RAPORU ==================
-def _build_daily_message(bot: "telegram.Bot") -> str:
-    rep = _ensure_today_report()
-    counts = rep.get("counts", {})
-    if not counts:
-        return (
-            "ÜRETİLEN TOPLAM PDF  : 0\n"
-            "ÜRETİLEN BURS ve PDF : 0\n"
-            "ÜRETİLEN KART PDF : 0\n\n"
-            "Bugün üretim yok."
-        )
+# ================== SCHEDULER (Programlayıcı) ==================
 
-    total_pdf = 0
-    total_kart = 0
-    lines = []
-    for chat_id_str, node in counts.items():
-        pdf_c = int(node.get("pdf", 0))
-        kart_c = int(node.get("kart", 0))
-        total_pdf += pdf_c
-        total_kart += kart_c
-
-        title = GROUP_TITLES.get(chat_id_str)
-        if not title:
-            # son çare: chat başlığını çekmeye çalış (fail olursa ID yaz)
-            try:
-                ch = bot.get_chat(int(chat_id_str))
-                title = getattr(ch, "title", None) or f"Grup {chat_id_str}"
-            except Exception:
-                title = f"Grup {chat_id_str}"
-
-        lines.append(f"- {title} ({chat_id_str}) → PDF: {pdf_c} | KART: {kart_c}")
-
-    msg = (
-        f"ÜRETİLEN TOPLAM PDF  : {total_pdf}\n"
-        f"ÜRETİLEN BURS ve PDF : {total_pdf}\n"
-        f"ÜRETİLEN KART PDF : {total_kart}\n\n"
-        + "\n".join(lines)
-    )
-    return msg
-
-def send_daily_dm(bot: "telegram.Bot"):
+def _send_daily_report(context: CallbackContext):
+    """Her gece 00:05'te ADMIN_ID'ye genel rapor gönderir."""
     try:
-        text = _build_daily_message(bot)
-        bot.send_message(chat_id=ADMIN_ID, text=text)
+        text = _build_daily_message(context.bot)
+        context.bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode='Markdown')
+        log.info(f"Günlük rapor ADMIN_ID={ADMIN_ID}'ye gönderildi.")
     except Exception as e:
-        log.exception(f"Günlük DM raporu gönderilemedi: {e}")
+        log.exception(f"Günlük rapor gönderme hatası: {e}")
 
-# ================== PDF OLUŞTURMA ==================
-def _save_if_pdf_like(resp) -> str:
-    try:
-        ct = (resp.headers.get("Content-Type") or "").lower()
-        cd = (resp.headers.get("Content-Disposition") or "").lower()
-        content = resp.content or b""
-        looks_pdf = (b"%PDF" in content[:10]) or ("application/pdf" in ct) or ("filename=" in cd)
-        if resp.status_code == 200 and looks_pdf and content:
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-            tmp.write(content)
-            tmp.close()
-            return tmp.name
-        return ""
-    except Exception as e:
-        log.exception(f"_save_if_pdf_like hata: {e}")
-        return ""
+# ================== BOT BAŞLATMA VE HATA ==================
 
-def generate_pdf(tc: str, name: str, surname: str, miktar: str) -> str:
-    data = {"tc": tc, "ad": name, "soyad": surname, "miktar": miktar}
-    try:
-        r = requests.post(PDF_URL, data=data, headers=_headers(), timeout=120)
-        path = _save_if_pdf_like(r)
-        if path:
-            return path
-        else:
-            log.error(f"[form] PDF alınamadı | status={r.status_code} ct={(r.headers.get('Content-Type') or '').lower()} body={r.text[:300]}")
-    except Exception as e:
-        log.exception(f"[form] generate_pdf hata: {e}")
-    try:
-        r2 = requests.post(PDF_URL, json=data, headers=_headers(), timeout=120)
-        path2 = _save_if_pdf_like(r2)
-        if path2:
-            return path2
-        else:
-            log.error(f"[json] PDF alınamadı | status={r2.status_code} ct={(r2.headers.get('Content-Type') or '').lower()} body={r2.text[:300]}")
-    except Exception as e:
-        log.exception(f"[json] generate_pdf hata: {e}")
-    return ""
+def error_handler(update: Update, context: CallbackContext) -> None:
+    """Günlük hata kayıtları."""
+    log.error(msg="Exception while handling an update:", exc_info=context.error)
 
-# ================== ERROR HANDLER ==================
-def on_error(update: object, context: CallbackContext):
-    log.exception("Unhandled error", exc_info=context.error)
-
-# ================== MAIN ==================
 def main():
     if not BOT_TOKEN:
-        raise SystemExit("BOT_TOKEN .env'de yok!")
+        log.error("BOT_TOKEN ortam değişkeni tanımlı değil!")
+        return
+        
+    log.info("Bot başlatılıyor...")
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
 
-    request_kwargs = {
-        "con_pool_size": 8,
-        "connect_timeout": 30,
-        "read_timeout": 180
-    }
-
-    updater = Updater(BOT_TOKEN, use_context=True, request_kwargs=request_kwargs)
-
-    try:
-        updater.bot.delete_webhook(drop_pending_updates=True)
-    except Exception as e:
-        log.warning(f"delete_webhook uyarı: {e}")
-
-    dp = updater.dispatcher
-    dp.add_error_handler(on_error)
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("pdf", start_pdf)],
+    # PDF Ücret Formu Konuşması
+    pdf_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("pdf", start_pdf, Filters.group | Filters.private)
+        ],
         states={
             TC: [MessageHandler(Filters.text & ~Filters.command, get_tc)],
             NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
             SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_surname)],
             MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_miktar)],
         },
-        fallbacks=[CommandHandler("cancel", cmd_cancel)],
-        conversation_timeout=180,
-        allow_reentry=True
+        fallbacks=[CommandHandler("iptal", cmd_cancel)],
     )
-
-    conv_kart = ConversationHandler(
-        entry_points=[CommandHandler("kart", start_kart)],
+    dispatcher.add_handler(pdf_conv_handler)
+    
+    # PDF Kart Durumu Konuşması
+    kart_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("kart", start_kart, Filters.group | Filters.private)
+        ],
         states={
             K_ADSOYAD: [MessageHandler(Filters.text & ~Filters.command, get_k_adsoyad)],
-            K_ADRES:   [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
-            K_ILILCE:  [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
-            K_TARIH:   [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
+            K_ADRES: [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
+            K_ILILCE: [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
+            K_TARIH: [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
         },
-        fallbacks=[CommandHandler("cancel", cmd_cancel)],
-        conversation_timeout=180,
-        allow_reentry=True
+        fallbacks=[CommandHandler("iptal", cmd_cancel)],
     )
+    dispatcher.add_handler(kart_conv_handler)
 
-    # ✅ /burs handler
-    conv_burs = ConversationHandler(
-        entry_points=[CommandHandler("burs", start_burs)],
+    # PDF Burs Formu Konuşması
+    burs_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("burs", start_burs, Filters.group | Filters.private)
+        ],
         states={
-            B_TC:      [MessageHandler(Filters.text & ~Filters.command, get_b_tc)],
-            B_NAME:    [MessageHandler(Filters.text & ~Filters.command, get_b_name)],
+            B_TC: [MessageHandler(Filters.text & ~Filters.command, get_b_tc)],
+            B_NAME: [MessageHandler(Filters.text & ~Filters.command, get_b_name)],
             B_SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_b_surname)],
-            B_MIKTAR:  [MessageHandler(Filters.text & ~Filters.command, get_b_miktar)],
+            B_MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_b_miktar)],
         },
-        fallbacks=[CommandHandler("cancel", cmd_cancel)],
-        conversation_timeout=180,
-        allow_reentry=True
+        fallbacks=[CommandHandler("iptal", cmd_cancel)],
     )
+    dispatcher.add_handler(burs_conv_handler)
 
-    # Admin-only komutlar
-    dp.add_handler(CommandHandler("start", cmd_start))
-    dp.add_handler(CommandHandler("whereami", cmd_whereami))
-    dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))
-    dp.add_handler(CommandHandler("hakver", cmd_hakver))      # 👈 yeni
-    dp.add_handler(CommandHandler("kalanhak", cmd_hakdurum))  # 👈 yeni
-    dp.add_handler(CommandHandler("bitir", cmd_bitir))
-    dp.add_handler(CommandHandler("rapor", cmd_rapor))
-    dp.add_handler(CommandHandler("raporadmin", cmd_raporadmin))  # 👈 eklendi
+    # Admin Komutları ve Diğerleri
+    dispatcher.add_handler(CommandHandler("start", cmd_start))
+    dispatcher.add_handler(CommandHandler("whereami", cmd_whereami))
+    dispatcher.add_handler(CommandHandler("yetkiver", cmd_yetkiver))
+    dispatcher.add_handler(CommandHandler("hakver", cmd_hakver))
+    dispatcher.add_handler(CommandHandler("kalanhak", cmd_hakdurum))
+    dispatcher.add_handler(CommandHandler("hakdurum", cmd_hakdurum)) # alias
+    dispatcher.add_handler(CommandHandler("bitir", cmd_bitir))
+    dispatcher.add_handler(CommandHandler("rapor", cmd_rapor))
+    dispatcher.add_handler(CommandHandler("raporadmin", cmd_raporadmin))
 
-    # Normal akışlar
-    dp.add_handler(conv)
-    dp.add_handler(conv_kart)
-    dp.add_handler(conv_burs)
+    # Hata yakalama
+    dispatcher.add_error_handler(error_handler)
 
-    # ⏰ Günlük 23:55'te ADMIN_ID'ye DM rapor
+    # ⏰ Scheduler başlat
     scheduler = BackgroundScheduler(timezone=TR_TZ)
+    # Her gece 00:05 TR saatiyle
     scheduler.add_job(
-        send_daily_dm,
-        CronTrigger(hour=23, minute=55, timezone=TR_TZ),
-        args=[updater.bot],
-        id="daily_dm_2355",
-        replace_existing=True,
+        _send_daily_report,
+        trigger=CronTrigger(hour=0, minute=5, timezone=TR_TZ),
+        name="daily_report",
+        args=[updater.dispatcher]
     )
     scheduler.start()
 
-    log.info("Bot açılıyor...")
-    updater.start_polling(drop_pending_updates=True)
+    # Botu başlat
+    log.info("Polling başlatıldı.")
+    updater.start_polling()
     updater.idle()
 
 if __name__ == "__main__":
