@@ -651,7 +651,7 @@ def cmd_raporadmin(update: Update, context: CallbackContext):
 
 # ================== /pdf ==================
 def start_pdf(update: Update, context: CallbackContext):
-    if not _check_group(update):
+    if not _check_group(update, context): # ✅ context eklendi
         return ConversationHandler.END
     inline = parse_pdf_inline(update.message.text or "")
     if inline:
