@@ -370,7 +370,7 @@ def _check_group(update: Update, context: CallbackContext) -> bool: # 👈 conte
             max_limit = _get_max_members(chat_id)
             
             if member_count > max_limit:
-                msg = f"⛔ Bu grup **{max_limit}** kişiyle sınırlıdır. Şu an: {member_count} kişi var."
+                msg = f"⛔ Bu grup 5 kişiyle sınırlıdır. Şu an: {member_count} kişi var."
                 try:
                     update.message.reply_text(msg)
                 except Exception:
