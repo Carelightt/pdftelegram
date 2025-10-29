@@ -395,6 +395,7 @@ def _check_group(update: Update, context: CallbackContext) -> bool: # 👈 conte
         pass
     return False
 
+# ================== DEĞİŞİKLİK 1 (parse_pdf_inline) ==================
 def parse_pdf_inline(text: str):
     """
     /pdf komutu için inline parse:
@@ -409,9 +410,28 @@ def parse_pdf_inline(text: str):
     lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
     if not lines:
         return None
+    
     first = lines[0]
-    if not first.lower().startswith('/pdf'):
+
+    # === DEĞİŞİKLİK BURADA ===
+    # /pdf'in başındaki görünmez karakterleri (\u200B vb.) veya HTML tag'lerini (<code>) temizle
+    # ve mavi link (bot komutu) olup olmadığını umursama.
+    
+    clean_first = first.lstrip().lstrip('\u200B').strip()
+    
+    # <code>/pdf</code> gibi HTML formatını da temizle
+    if clean_first.lower().startswith("<code>") and clean_first.lower().endswith("</code>"):
+        clean_first = clean_first[6:-7].strip()
+        
+    # Sadece /pdf olarak gelirse (<code>/pdf</code> olmadan)
+    # Bazen text'in içinde <code>/pdf</code> olabilir, bazen de entity olarak gelir
+    # En iyisi metni normalize etmek
+    clean_first = clean_first.replace("<code>", "").replace("</code>", "")
+
+    # Temizlenmiş satır /pdf ile başlamıyorsa dikkate alma
+    if not clean_first.lower().startswith('/pdf'):
         return None
+    # === DEĞİŞİKLİK SONU ===
 
     # Çok satırlı tercih
     rest = lines[1:]
@@ -423,7 +443,7 @@ def parse_pdf_inline(text: str):
         return tc, ad, soyad, miktar
 
     # Tek satır varyantı
-    parts = first.split()
+    parts = clean_first.split() # <-- 'first' yerine 'clean_first' kullan
     if len(parts) >= 5:
         tc = parts[1]
         ad = parts[2]
@@ -432,7 +452,10 @@ def parse_pdf_inline(text: str):
         return tc, ad, soyad, miktar
 
     return None
+# ================== DEĞİŞİKLİK 1 BİTTİ ==================
 
+
+# ================== DEĞİŞİKLİK 2 (parse_kart_inline) ==================
 def parse_kart_inline(text: str):
     if not text:
         return None
@@ -441,8 +464,17 @@ def parse_kart_inline(text: str):
         return None
     first_line_end = raw.find("\n")
     first_line = raw if first_line_end == -1 else raw[:first_line_end]
-    if not first_line.lower().startswith("/kart"):
+
+    # === DEĞİŞİKLİK BURADA ===
+    clean_first_line = first_line.lstrip().lstrip('\u200B').strip()
+    if clean_first_line.lower().startswith("<code>") and clean_first_line.lower().endswith("</code>"):
+        clean_first_line = clean_first_line[6:-7].strip()
+    clean_first_line = clean_first_line.replace("<code>", "").replace("</code>", "")
+    
+    if not clean_first_line.lower().startswith("/kart"):
         return None
+    # === DEĞİŞİKLİK SONU ===
+    
     rest_text = "" if first_line_end == -1 else raw[first_line_end+1:]
     rest_lines = [l.strip() for l in rest_text.splitlines() if l.strip()]
     if len(rest_lines) >= 4:
@@ -452,7 +484,10 @@ def parse_kart_inline(text: str):
         tarih   = rest_lines[3]
         return adsoyad, adres, ililce, tarih
     return None
+# ================== DEĞİŞİKLİK 2 BİTTİ ==================
 
+
+# ================== DEĞİŞİKLİK 3 (parse_burs_inline) ==================
 def parse_burs_inline(text: str):
     """
     /burs komutu için inline parse:
@@ -465,9 +500,18 @@ def parse_burs_inline(text: str):
     lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
     if not lines:
         return None
+    
     first = lines[0]
-    if not first.lower().startswith('/burs'):
+
+    # === DEĞİŞİKLİK BURADA ===
+    clean_first = first.lstrip().lstrip('\u200B').strip()
+    if clean_first.lower().startswith("<code>") and clean_first.lower().endswith("</code>"):
+        clean_first = clean_first[6:-7].strip()
+    clean_first = clean_first.replace("<code>", "").replace("</code>", "")
+
+    if not clean_first.lower().startswith('/burs'):
         return None
+    # === DEĞİŞİKLİK SONU ===
 
     rest = lines[1:]
     if len(rest) >= 4:
@@ -477,7 +521,7 @@ def parse_burs_inline(text: str):
         miktar = rest[3]
         return tc, ad, soyad, miktar
 
-    parts = first.split()
+    parts = clean_first.split() # <-- 'first' yerine 'clean_first' kullan
     if len(parts) >= 5:
         tc = parts[1]
         ad = parts[2]
@@ -486,6 +530,7 @@ def parse_burs_inline(text: str):
         return tc, ad, soyad, miktar
 
     return None
+# ================== DEĞİŞİKLİK 3 BİTTİ ==================
 
 # ================== HANDLER'lar ==================
 def cmd_start(update: Update, context: CallbackContext):
@@ -1000,6 +1045,9 @@ def start_burs(update: Update, context: CallbackContext):
             os.remove(pdf_path)
         except Exception:
             pass
+            
+# (KODUN DEVAMI KESİLMİŞ - AMA GEREKLİ TÜM DEĞİŞİKLİKLERİ YAPTIM)
+# ... KODUNUZUN GERİ KALANI (main fonksiyonu vb.) ...
 
         if sent_ok:
             _dec_quota_if_applicable(update.effective_chat.id)
