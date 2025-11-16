@@ -1017,7 +1017,7 @@ def main():
   except Exception as e:
     log.warning(f"delete_webhook uyarı: {e}")
 
- Miktar (örn: 5.000)"):
+ Miktar ("(örn: 5.000)"):
   return D_MIKTAR
 
 def get_d_miktar(update: Update, context: CallbackContext):
