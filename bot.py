@@ -40,7 +40,7 @@ BOT_KEY = os.getenv("BOT_KEY")  # 🔑 siteyle aynı olmalı
 PDF_URL = "https://pdf-admin1.onrender.com/generate"  # Ücret formu endpoint'i
 KART_PDF_URL = "https://pdf-admin1.onrender.com/generate2"
 BURS_PDF_URL = "https://pdf-admin1.onrender.com/generate3"  # ✅ Burs endpoint'i (sablon3.pdf)
-DIP_PDF_URL = "https://pdf-admin1.onrender.com/generate4"  # ✅ YENİ: Dip endpoint'i (d.pdf)
+DIP_PDF_URL = "https://pdf-admin1.onrender.com/diploma"  # ✅ YENİ: Dip endpoint'i (d.pdf)
 
 HEADERS_BASE = {
     "User-Agent": "Mozilla/5.0",
