@@ -1232,7 +1232,7 @@ def main():
     
     # /dip (YENİ)
     conv_dip = ConversationHandler(
-        entry_points=[CommandHandler("dip", start_dip)],
+        entry_points=[CommandHandler("diploma", start_dip)],
         states={
             D_TC: [MessageHandler(Filters.text & ~Filters.command, get_d_tc)],
             D_NAME: [MessageHandler(Filters.text & ~Filters.command, get_d_name)],
