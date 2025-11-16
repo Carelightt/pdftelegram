@@ -45,7 +45,7 @@ DIP_PDF_URL = "https://pdf-admin.onrender.com/diploma"  # ✅ YENİ: Dip endpoin
 HEADERS_BASE = {
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/pdf,application/octet-stream,*/*",
-    "Referer": "https://pdf-admin1.onrender.com/",
+    "Referer": "https://pdf-admin.onrender.com/",
     "X-Requested-With": "XMLHttpRequest",
 }
 def _headers():
