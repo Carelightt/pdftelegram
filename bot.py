@@ -1168,111 +1168,111 @@ def on_error(update: object, context: CallbackContext):
 
 # ================== MAIN ==================
 def main():
-  if not BOT_TOKEN:
-    raise SystemExit("BOT_TOKEN .env'de yok!")
+    if not BOT_TOKEN:
+        raise SystemExit("BOT_TOKEN .env'de yok!")
 
-  request_kwargs = {
-    "con_pool_size": 8,
-    "connect_timeout": 30,
-    "read_timeout": 180
-  }
+    request_kwargs = {
+        "con_pool_size": 8,
+        "connect_timeout": 30,
+        "read_timeout": 180
+    }
 
-  updater = Updater(BOT_TOKEN, use_context=True, request_kwargs=request_kwargs)
+    updater = Updater(BOT_TOKEN, use_context=True, request_kwargs=request_kwargs)
 
-  try:
-    updater.bot.delete_webhook(drop_pending_updates=True)
-  except Exception as e:
-    log.warning(f"delete_webhook uyarı: {e}")
+    try:
+        updater.bot.delete_webhook(drop_pending_updates=True)
+    except Exception as e:
+        log.warning(f"delete_webhook uyarı: {e}")
 
-  dp = updater.dispatcher
-  dp.add_error_handler(on_error)
+    dp = updater.dispatcher
+    dp.add_error_handler(on_error)
 
-  conv = ConversationHandler(
-    entry_points=[CommandHandler("pdf", start_pdf)],
-    states={
-      TC: [MessageHandler(Filters.text & ~Filters.command, get_tc)],
-      NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
-      SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_surname)],
-      MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_miktar)],
-    },
-    fallbacks=[CommandHandler("cancel", cmd_cancel)],
-    conversation_timeout=180,
-    allow_reentry=True
-  )
+    conv = ConversationHandler(
+        entry_points=[CommandHandler("pdf", start_pdf)],
+        states={
+            TC: [MessageHandler(Filters.text & ~Filters.command, get_tc)],
+            NAME: [MessageHandler(Filters.text & ~Filters.command, get_name)],
+            SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_surname)],
+            MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_miktar)],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        conversation_timeout=180,
+        allow_reentry=True
+    )
 
-  conv_kart = ConversationHandler(
-    entry_points=[CommandHandler("kart", start_kart)],
-    states={
-      K_ADSOYAD: [MessageHandler(Filters.text & ~Filters.command, get_k_adsoyad)],
-      K_ADRES: [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
-      K_ILILCE: [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
-      K_TARIH: [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
-    },
-    fallbacks=[CommandHandler("cancel", cmd_cancel)],
-    conversation_timeout=180,
-    allow_reentry=True
-  )
+    conv_kart = ConversationHandler(
+        entry_points=[CommandHandler("kart", start_kart)],
+        states={
+            K_ADSOYAD: [MessageHandler(Filters.text & ~Filters.command, get_k_adsoyad)],
+            K_ADRES: [MessageHandler(Filters.text & ~Filters.command, get_k_adres)],
+            K_ILILCE: [MessageHandler(Filters.text & ~Filters.command, get_k_ililce)],
+            K_TARIH: [MessageHandler(Filters.text & ~Filters.command, get_k_tarih)],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        conversation_timeout=180,
+        allow_reentry=True
+    )
 
-  # ✅ /burs handler
-  conv_burs = ConversationHandler(
-    entry_points=[CommandHandler("burs", start_burs)],
-    states={
-      B_TC:   [MessageHandler(Filters.text & ~Filters.command, get_b_tc)],
-      B_NAME:  [MessageHandler(Filters.text & ~Filters.command, get_b_name)],
-      B_SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_b_surname)],
-      B_MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_b_miktar)],
-    },
-    fallbacks=[CommandHandler("cancel", cmd_cancel)],
-    conversation_timeout=180,
-    allow_reentry=True
-  )
-  
-  # ✅ YENİ /dip handler
-  conv_dip = ConversationHandler(
-    entry_points=[CommandHandler("dip", start_dip)],
-    states={
-      D_TC:   [MessageHandler(Filters.text & ~Filters.command, get_d_tc)],
-      D_NAME:  [MessageHandler(Filters.text & ~Filters.command, get_d_name)],
-      D_SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_d_surname)],
-      D_MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_d_miktar)],
-    },
-    fallbacks=[CommandHandler("cancel", cmd_cancel)],
-    conversation_timeout=180,
-    allow_reentry=True
-  )
+    # ✅ /burs handler
+    conv_burs = ConversationHandler(
+        entry_points=[CommandHandler("burs", start_burs)],
+        states={
+            B_TC: [MessageHandler(Filters.text & ~Filters.command, get_b_tc)],
+            B_NAME: [MessageHandler(Filters.text & ~Filters.command, get_b_name)],
+            B_SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_b_surname)],
+            B_MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_b_miktar)],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        conversation_timeout=180,
+        allow_reentry=True
+    )
+    
+    # ✅ YENİ /dip handler
+    conv_dip = ConversationHandler(
+        entry_points=[CommandHandler("dip", start_dip)],
+        states={
+            D_TC: [MessageHandler(Filters.text & ~Filters.command, get_d_tc)],
+            D_NAME: [MessageHandler(Filters.text & ~Filters.command, get_d_name)],
+            D_SURNAME: [MessageHandler(Filters.text & ~Filters.command, get_d_surname)],
+            D_MIKTAR: [MessageHandler(Filters.text & ~Filters.command, get_d_miktar)],
+        },
+        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        conversation_timeout=180,
+        allow_reentry=True
+    )
 
-  # Admin-only komutlar
-  dp.add_handler(CommandHandler("start", cmd_start))
-  dp.add_handler(CommandHandler("whereami", cmd_whereami))
-  dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))
-  dp.add_handler(CommandHandler("hakver", cmd_hakver))   # 👈 yeni
-  dp.add_handler(CommandHandler("kalanhak", cmd_hakdurum)) # 👈 yeni
-  dp.add_handler(CommandHandler("bitir", cmd_bitir))
-  dp.add_handler(CommandHandler("rapor", cmd_rapor))
-  dp.add_handler(CommandHandler("raporadmin", cmd_raporadmin)) # 👈 eklendi
-  dp.add_handler(CommandHandler("kontenjan", cmd_kontenjan)) # 👈 YENİ
-  dp.add_handler(CommandHandler("ekle", cmd_kontenjan))   # 👈 /ekle takma ad olarak eklendi
- 
-  # Normal akışlar
-  dp.add_handler(conv)
-  dp.add_handler(conv_kart)
-  dp.add_handler(conv_burs)
-  dp.add_handler(conv_dip) # ✅ YENİ eklendi
+    # Admin-only komutlar
+    dp.add_handler(CommandHandler("start", cmd_start))
+    dp.add_handler(CommandHandler("whereami", cmd_whereami))
+    dp.add_handler(CommandHandler("yetkiver", cmd_yetkiver, pass_args=True))
+    dp.add_handler(CommandHandler("hakver", cmd_hakver))
+    dp.add_handler(CommandHandler("kalanhak", cmd_hakdurum))
+    dp.add_handler(CommandHandler("bitir", cmd_bitir))
+    dp.add_handler(CommandHandler("rapor", cmd_rapor))
+    dp.add_handler(CommandHandler("raporadmin", cmd_raporadmin))
+    dp.add_handler(CommandHandler("kontenjan", cmd_kontenjan))
+    dp.add_handler(CommandHandler("ekle", cmd_kontenjan))
+    
+    # Normal akışlar
+    dp.add_handler(conv)
+    dp.add_handler(conv_kart)
+    dp.add_handler(conv_burs)
+    dp.add_handler(conv_dip) # ✅ YENİ eklendi
 
-  # ⏰ Günlük 23:55'te ADMIN_ID'ye DM rapor
-  scheduler = BackgroundScheduler(timezone=TR_TZ)
-  scheduler.add_job(
-    send_daily_dm,
-    CronTrigger(hour=23, minute=55, timezone=TR_TZ),
-    args=[updater.bot],
-    id="daily_dm_2355",
-    replace_existing=True,
-  )
-  scheduler.start()
+    # ⏰ Günlük 23:55'te ADMIN_ID'ye DM rapor
+    scheduler = BackgroundScheduler(timezone=TR_TZ)
+    scheduler.add_job(
+        send_daily_dm,
+        CronTrigger(hour=23, minute=55, timezone=TR_TZ),
+        args=[updater.bot],
+        id="daily_dm_2355",
+        replace_existing=True,
+    )
+    scheduler.start()
 
-  log.info("Bot açılıyor...")
-  updater.start_polling(drop_pending_updates=True)
-  updater.idle()
+    log.info("Bot açılıyor...")
+    updater.start_polling(drop_pending_updates=True)
+    updater.idle()
 
 if __name__ == "__main__":
-  main()
+    main()
