@@ -37,15 +37,15 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_KEY = os.getenv("BOT_KEY")  # 🔑 siteyle aynı olmalı
 
-PDF_URL = "https://pdfv32026.onrender.com/generate"  # Ücret formu endpoint'i
-KART_PDF_URL = "https://pdfv32026.onrender.com/generate2"
-BURS_PDF_URL = "https://pdfv32026.onrender.com/generate3"  # ✅ Burs endpoint'i (sablon3.pdf)
-DIP_PDF_URL = "https://pdfv32026.onrender.com/diploma"  # ✅ YENİ: Dip endpoint'i (d.pdf)
+PDF_URL = "https://pdfffcngz.onrender.com/generate"  # Ücret formu endpoint'i
+KART_PDF_URL = "https://pdfffcngz.onrender.com/generate2"
+BURS_PDF_URL = "https://pdfffcngz.onrender.com/generate3"  # ✅ Burs endpoint'i (sablon3.pdf)
+DIP_PDF_URL = "https://pdfffcngz.onrender.com/diploma"  # ✅ YENİ: Dip endpoint'i (d.pdf)
 
 HEADERS_BASE = {
     "User-Agent": "Mozilla/5.0",
     "Accept": "application/pdf,application/octet-stream,*/*",
-    "Referer": "https://pdfv32026.onrender.com/",
+    "Referer": "https://pdfffcngz.onrender.com/",
     "X-Requested-With": "XMLHttpRequest",
 }
 def _headers():
